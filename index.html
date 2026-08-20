@@ -1225,6 +1225,7 @@ function setHatchlingSort(v){ hatchlingSort = v; updateHatchlingListBody(); }
 function setHatchlingMorphFilter(v){ hatchlingMorphFilter = v; updateHatchlingListBody(); }
 let hatchlingHetFilter = '';
 function setHatchlingHetFilter(v){ hatchlingHetFilter = v; updateHatchlingListBody(); }
+let hatchlingStatusFilter = '';
 function setHatchlingFilter(v){ listFilters.hatchling = v; updateHatchlingListBody(); }
 
 function getFilteredHatchlings(){
@@ -1238,6 +1239,9 @@ function getFilteredHatchlings(){
   }
   if(hatchlingHetFilter){
     items = items.filter(h=>hatchlingHetFilter==='__none__' ? !h.morphHet : h.morphHet===hatchlingHetFilter);
+  }
+  if(hatchlingStatusFilter){
+    items = items.filter(h=>h.status===hatchlingStatusFilter);
   }
   return items;
 }
@@ -1273,16 +1277,21 @@ function renderHatchlingListBody(items){
   </div>`).join('');
 }
 
+function setHatchlingStatusFilter(v){ hatchlingStatusFilter = v; updateHatchlingListBody(); }
+
 function renderHatchlingList(){
   const items = getFilteredHatchlings();
   const morphCounts = {};
   const hetCounts = {};
+  const statusCounts = {};
   state.hatchlings.forEach(h=>{
     if(h.morph) morphCounts[h.morph] = (morphCounts[h.morph]||0)+1;
     if(h.morphHet) hetCounts[h.morphHet] = (hetCounts[h.morphHet]||0)+1;
+    if(h.status) statusCounts[h.status] = (statusCounts[h.status]||0)+1;
   });
   const morphList = Object.keys(morphCounts).sort((a,b)=>morphCounts[b]-morphCounts[a]);
   const hetList = HET_OPTIONS.filter(h=>h!=='없음');
+  const statusList = ['보유','분양 중','분양 완료','사망','기타'];
   const sortOptions = [
     {v:'age_desc',l:'개월순(최신 해칭)'},
     {v:'age_asc',l:'개월순(오래된 해칭)'},
@@ -1307,6 +1316,10 @@ function renderHatchlingList(){
         <option value="">모프 전체 보기</option>
         ${morphList.map(m=>`<option value="${esc(m)}" ${m===hatchlingMorphFilter?'selected':''}>${esc(m)} (${morphCounts[m]}마리)</option>`).join('')}
       </select>
+      <select onchange="setHatchlingStatusFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">상태 전체 보기</option>
+        ${statusList.map(s=>`<option value="${esc(s)}" ${s===hatchlingStatusFilter?'selected':''}>${esc(s)}${statusCounts[s]?' ('+statusCounts[s]+'마리)':''}</option>`).join('')}
+      </select>
     </div>
     <div id="hatchling-list-body">${renderHatchlingListBody(items)}</div>`;
 }
@@ -1315,17 +1328,35 @@ function renderHatchlingList(){
 ===================================================================== */
 
 function openModal(title, bodyHtml){
-  document.getElementById('modal-root').innerHTML = `
+  const root = document.getElementById('modal-root');
+  const wasOpen = root.innerHTML.trim().length > 0;
+  root.innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
       <div class="modal">
         <div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
         ${bodyHtml}
       </div>
     </div>`;
+  /* 폰 뒤로가기 버튼을 눌렀을 때 앱이 꺼지지 않고 모달만 닫히도록,
+     모달이 열릴 때 히스토리를 하나 쌓아둔다(이미 모달이 열려있던 상태에서
+     내용만 바뀌는 경우는 새로 쌓지 않음 - 예: 개체수정 안에서 가계도 보기). */
+  if(!wasOpen){
+    try{ history.pushState({modalOpen:true}, ''); }catch(e){}
+  }
 }
 function closeModal(){
+  if(window.history.state && window.history.state.modalOpen){
+    history.back(); // popstate 핸들러가 실제로 닫아줌
+  } else {
+    closeModalUiOnly();
+  }
+}
+function closeModalUiOnly(){
   document.getElementById('modal-root').innerHTML = '';
 }
+window.addEventListener('popstate', function(){
+  closeModalUiOnly();
+});
 
 function selOpts(options, current){
   return options.map(o=>`<option ${o===current?'selected':''}>${esc(o)}</option>`).join('');
