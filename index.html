@@ -123,8 +123,9 @@ main{padding:16px 16px 100px;}
 .photo-star.active{background:var(--amber);color:#fff;}
 .photo-remove{position:absolute;top:-7px;right:-7px;width:20px;height:20px;border-radius:50%;border:none;background:var(--danger);color:#fff;font-size:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.2);line-height:1;padding:0;}
 .photo-add{width:72px;height:72px;border:2px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink-faint);font-size:24px;font-weight:300;}
-.card-avatar{width:44px;height:44px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex:0 0 auto;}
+.card-avatar{width:44px;height:44px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex:0 0 auto;cursor:pointer;}
 .card-avatar-placeholder{width:44px;height:44px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:18px;}
+.photo-viewer-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(18,29,20,0.5);color:#fff;border:none;border-radius:50%;width:38px;height:38px;font-size:20px;line-height:1;cursor:pointer;}
 .chip-group{display:flex;flex-wrap:wrap;gap:6px;}
 .chip-toggle{border:1px solid var(--border);background:var(--surface-2);color:var(--ink-soft);font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;font-family:var(--font-body);}
 .chip-toggle.chip-selected{background:var(--moss);border-color:var(--moss);color:#fff;}
@@ -1147,10 +1148,13 @@ function updateIndividualListBody(){
   if(count) count.textContent = `${items.length} / ${state.individuals.length}마리`;
 }
 
-function avatarHtml(entity){
-  const photo = (entity.photos||[]).find(p=>p.id===entity.primaryPhotoId) || (entity.photos||[])[0];
-  if(photo) return `<img src="${photo.dataUrl}" class="card-avatar">`;
-  return `<div class="card-avatar-placeholder">🦎</div>`;
+function avatarHtml(entity, kind){
+  const photos = entity.photos || [];
+  if(photos.length===0) return `<div class="card-avatar-placeholder">🦎</div>`;
+  const primaryIdx = Math.max(0, photos.findIndex(p=>p.id===entity.primaryPhotoId));
+  const photo = photos[primaryIdx] || photos[0];
+  if(!kind) return `<img src="${photo.dataUrl}" class="card-avatar">`;
+  return `<img src="${photo.dataUrl}" class="card-avatar" onclick="event.stopPropagation(); openPhotoViewer('${kind}','${entity.id}', ${primaryIdx})">`;
 }
 
 function renderIndividualListBody(items){
@@ -1160,7 +1164,7 @@ function renderIndividualListBody(items){
   return items.map(i=>`<div class="card" onclick="openIndividualForm('${i.id}')">
     <div class="card-top">
       <div style="display:flex;gap:10px;align-items:flex-start;">
-        ${avatarHtml(i)}
+        ${avatarHtml(i, 'individual')}
         <div><div class="card-title">${esc(i.name)||'(이름없음)'}</div><div class="card-id">${esc(i.id)}</div></div>
       </div>
       <div class="chip ${i.gender==='수컷'?'alt':(i.gender==='암컷'?'':'muted')}">${esc(i.gender)}</div>
@@ -1252,7 +1256,7 @@ function renderHatchlingListBody(items){
   return items.map(h=>`<div class="card" onclick="openHatchlingForm('${h.id}')">
     <div class="card-top">
       <div style="display:flex;gap:10px;align-items:flex-start;">
-        ${avatarHtml(h)}
+        ${avatarHtml(h, 'hatchling')}
         <div><div class="card-title">${esc(h.morph)||'모프 미정'}${h.morphHet?(' <span style="font-size:12px;color:var(--ink-faint);font-weight:600;">'+esc(formatHetDisplay(h.morphHet))+'</span>'):''}</div><div class="card-id">${esc(h.id)} (알 ${esc(h.eggLabel)})</div></div>
       </div>
       <div class="chip ${h.status==='보유'?'':'muted'}">${esc(h.status)}</div>
@@ -1406,6 +1410,60 @@ function renderPhotoStrip(){
   box.innerHTML = html;
 }
 
+/* ---------------- 사진 크게 보기(뷰어) ---------------- */
+let photoViewerState = { kind:null, id:null, index:0 };
+let photoViewerTouchX = null;
+
+function openPhotoViewer(kind, id, startIndex){
+  const entity = kind==='individual' ? state.individuals.find(i=>i.id===id) : state.hatchlings.find(h=>h.id===id);
+  if(!entity || !(entity.photos||[]).length) return;
+  photoViewerState = { kind, id, index: startIndex||0 };
+  renderPhotoViewer();
+}
+function photoViewerEntity(){
+  return photoViewerState.kind==='individual'
+    ? state.individuals.find(i=>i.id===photoViewerState.id)
+    : state.hatchlings.find(h=>h.id===photoViewerState.id);
+}
+function renderPhotoViewer(){
+  const entity = photoViewerEntity();
+  if(!entity){ closeModal(); return; }
+  const photos = entity.photos || [];
+  if(photos.length===0){ closeModal(); return; }
+  const idx = ((photoViewerState.index % photos.length) + photos.length) % photos.length;
+  photoViewerState.index = idx;
+  const photo = photos[idx];
+  const isPrimary = photo.id === entity.primaryPhotoId;
+  const label = entity.name || entity.morph || entity.id;
+
+  const body = `
+    <div style="position:relative;" ontouchstart="photoViewerTouchStart(event)" ontouchend="photoViewerTouchEnd(event)">
+      <img src="${photo.dataUrl}" style="width:100%;border-radius:14px;display:block;background:var(--surface-2);">
+      ${photos.length>1?`
+        <button type="button" onclick="photoViewerNav(-1)" class="photo-viewer-nav" style="left:6px;">‹</button>
+        <button type="button" onclick="photoViewerNav(1)" class="photo-viewer-nav" style="right:6px;">›</button>
+      `:''}
+    </div>
+    ${photos.length>1?`<div style="display:flex;justify-content:center;gap:6px;margin-top:12px;">
+      ${photos.map((p,i)=>`<span style="width:7px;height:7px;border-radius:50%;background:${i===idx?'var(--pine)':'var(--border)'};display:inline-block;"></span>`).join('')}
+    </div>`:''}
+    <div style="text-align:center;font-size:12px;color:var(--ink-faint);margin-top:8px;">${idx+1} / ${photos.length}${isPrimary?' · 대표 사진 ★':''}</div>
+  `;
+  openModal(label, body);
+}
+function photoViewerNav(delta){
+  photoViewerState.index += delta;
+  renderPhotoViewer();
+}
+function photoViewerTouchStart(e){
+  photoViewerTouchX = e.changedTouches[0].clientX;
+}
+function photoViewerTouchEnd(e){
+  if(photoViewerTouchX===null) return;
+  const dx = e.changedTouches[0].clientX - photoViewerTouchX;
+  photoViewerTouchX = null;
+  if(Math.abs(dx) > 40) photoViewerNav(dx < 0 ? 1 : -1);
+}
 
 function buildIndividualOptionsByGender(gender, selectedId){
   let html = `<option value="">직접 입력(미등록/외부)</option>`;
