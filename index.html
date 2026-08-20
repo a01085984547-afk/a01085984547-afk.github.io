@@ -68,14 +68,13 @@ main{padding:16px 16px 100px;}
 .chip.muted{background:#EEEBDF;color:var(--ink-soft);}
 .chip.danger{background:var(--danger-soft);color:var(--danger);}
 .card-sub{font-size:12.5px;color:var(--ink-soft);margin-top:8px;line-height:1.5;}
-.compact-list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);}
-.compact-row{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);}
-.compact-row:last-child{border-bottom:none;}
+.compact-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.compact-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);min-width:0;}
 .compact-row:active{background:var(--surface-2);}
 .compact-info{min-width:0;flex:1;}
-.compact-name{font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.compact-sub{font-size:11px;color:var(--ink-faint);font-weight:500;font-family:var(--font-body);}
-.compact-meta{font-size:11.5px;color:var(--ink-soft);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.compact-name{font-family:var(--font-display);font-weight:600;font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.compact-sub{font-size:10.5px;color:var(--ink-faint);font-weight:500;font-family:var(--font-body);display:block;}
+.compact-meta{font-size:10.5px;color:var(--ink-soft);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .exit-toast{
   position:fixed;left:50%;bottom:90px;transform:translateX(-50%);
   background:rgba(18,29,20,0.92);color:#fff;padding:10px 18px;border-radius:999px;
@@ -250,6 +249,26 @@ function fmtMoney(n){
   return Number(n).toLocaleString('ko-KR')+'원';
 }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
+/* 해칭일 기준 나이를 "N개월" / "N년 M개월" / 어리면 "N일"로 사람이 읽기 좋게 */
+function ageLabel(dateStr){
+  if(!dateStr) return '';
+  const d = new Date(dateStr+'T00:00:00');
+  const now = new Date();
+  if(isNaN(d.getTime())) return '';
+  let months = (now.getFullYear()-d.getFullYear())*12 + (now.getMonth()-d.getMonth());
+  if(now.getDate() < d.getDate()) months--;
+  if(months < 0) months = 0;
+  if(months < 1){
+    const days = Math.max(0, daysBetween(dateStr, todayISO()));
+    return `${days}일`;
+  }
+  if(months >= 12){
+    const years = Math.floor(months/12);
+    const rem = months % 12;
+    return rem>0 ? `${years}년 ${rem}개월` : `${years}년`;
+  }
+  return `${months}개월`;
+}
 function addDays(dateStr, days){
   if(!dateStr || days===null || days===undefined || isNaN(days)) return null;
   const d = new Date(dateStr+'T00:00:00');
@@ -1187,10 +1206,11 @@ function setIndividualViewMode(v){
 function renderIndividualCompactRow(i){
   const morphLabel = formatMorphFull(i.morph, i.morphHet).main;
   return `<div class="compact-row" onclick="openIndividualForm('${i.id}')">
-    ${avatarHtml(i, 'individual', 34)}
+    ${avatarHtml(i, 'individual', 30)}
     <div class="compact-info">
-      <div class="compact-name">${esc(i.name)||'(이름없음)'}${morphLabel?` <span class="compact-sub">${esc(morphLabel)}</span>`:''}</div>
-      <div class="compact-meta">${esc(i.gender)||'-'} · ${esc(i.status)||'-'}${i.salePrice?(' · '+fmtMoney(i.salePrice)):''}</div>
+      <div class="compact-name">${esc(i.name)||'(이름없음)'}</div>
+      <div class="compact-meta">${morphLabel?esc(morphLabel)+' · ':''}${esc(i.gender)||'-'}</div>
+      <div class="compact-meta">${esc(i.status)||'-'}${i.salePrice?(' · '+fmtMoney(i.salePrice)):''}</div>
     </div>
   </div>`;
 }
@@ -1219,7 +1239,7 @@ function renderIndividualListBody(items){
       ${i.breeding==='예'?`<span class="chip">브리딩</span>`:''}
       ${i.main==='예'?`<span class="chip alt">메인</span>`:''}
     </div>
-    <div class="card-sub">해칭일 ${esc(i.hatchDate)||'미상'} · 출신 ${esc(i.originType)||'-'} ${i.originCompany?('('+esc(i.originCompany)+')'):''}</div>
+    <div class="card-sub">해칭일 ${esc(i.hatchDate)||'미상'}${i.hatchDate?` (${ageLabel(i.hatchDate)})`:''} · 출신 ${esc(i.originType)||'-'} ${i.originCompany?('('+esc(i.originCompany)+')'):''}</div>
   </div>`).join('');
 }
 
@@ -1311,10 +1331,11 @@ function setHatchlingViewMode(v){
 
 function renderHatchlingCompactRow(h){
   return `<div class="compact-row" onclick="openHatchlingForm('${h.id}')">
-    ${avatarHtml(h, 'hatchling', 34)}
+    ${avatarHtml(h, 'hatchling', 30)}
     <div class="compact-info">
-      <div class="compact-name">${esc(h.morph)||'모프 미정'}${h.morphHet?` <span class="compact-sub">${esc(formatHetDisplay(h.morphHet))}</span>`:''}</div>
-      <div class="compact-meta">${esc(h.gender)||'-'} · ${esc(h.status)||'-'}${h.price?(' · '+fmtMoney(h.price)):''}</div>
+      <div class="compact-name">${esc(h.morph)||'모프 미정'}</div>
+      <div class="compact-meta">${h.morphHet?esc(formatHetDisplay(h.morphHet))+' · ':''}${esc(h.gender)||'-'}</div>
+      <div class="compact-meta">${esc(h.status)||'-'}${h.price?(' · '+fmtMoney(h.price)):''}</div>
     </div>
   </div>`;
 }
@@ -1342,7 +1363,7 @@ function renderHatchlingListBody(items){
       ${h.promotedToId?`<span class="chip">개체 등록됨</span>`:''}
       ${h.price?`<span class="chip muted">${fmtMoney(h.price)}</span>`:''}
     </div>
-    <div class="card-sub">부모 ${esc(h.damName)} × ${esc(h.sireName)} · 해칭일 ${esc(h.hatchDate)||'-'}${(()=>{const c=state.clutches.find(c=>c.id===h.clutchId);return c&&c.clutchNum?' · '+esc(c.clutchNum)+'차':'';})()}</div>
+    <div class="card-sub">부모 ${esc(h.damName)} × ${esc(h.sireName)} · 해칭일 ${esc(h.hatchDate)||'-'}${h.hatchDate?` (${ageLabel(h.hatchDate)})`:''}${(()=>{const c=state.clutches.find(c=>c.id===h.clutchId);return c&&c.clutchNum?' · '+esc(c.clutchNum)+'차':'';})()}</div>
   </div>`).join('');
 }
 
@@ -1465,6 +1486,12 @@ window.addEventListener('popstate', function(){
 
 function selOpts(options, current){
   return options.map(o=>`<option ${o===current?'selected':''}>${esc(o)}</option>`).join('');
+}
+function updateOwnAgeNote(){
+  const dateEl = document.getElementById('ownHatchDateField');
+  const noteEl = document.getElementById('ownAgeNote');
+  if(!dateEl || !noteEl) return;
+  noteEl.textContent = dateEl.value ? `현재 나이: ${ageLabel(dateEl.value)}` : '';
 }
 
 /* ---------------- 개체 사진(최대 3장, 대표 사진 지정) ---------------- */
@@ -1693,13 +1720,14 @@ function openIndividualForm(id){
       <div class="form-grid" style="margin-top:14px;">
         <label class="field full"><span>이름</span><input name="name" value="${esc(data.name||'')}" required></label>
         <label class="field"><span>성별</span><select name="gender">${selOpts(['수컷','암컷','미구분'],data.gender)}</select></label>
-        <label class="field"><span>해칭일</span><input type="date" name="hatchDate" value="${esc(data.hatchDate||'')}"></label>
+        <label class="field"><span>해칭일</span><input type="date" name="hatchDate" id="ownHatchDateField" value="${esc(data.hatchDate||'')}" onchange="updateOwnAgeNote()"></label>
         <label class="field"><span>모프(기본)</span>${buildMorphSelectHtml('own', data.morph||'')}</label>
         <label class="field"><span>헷(Het) 여부</span>${buildHetSelectHtml('own', data.morphHet||'')}</label>
         <label class="field"><span>점 여부</span><select name="dotStatus">${selOpts(['있음','없음','미상'],data.dotStatus)}</select></label>
         <label class="field"><span>출신 구분</span><select name="originType">${selOpts(['외부 영입','자가 해칭'],data.originType)}</select></label>
         <label class="field full"><span>출신 업체</span><input name="originCompany" value="${esc(data.originCompany||'')}"></label>
       </div>
+      <div class="readonly-note" id="ownAgeNote" style="margin-top:-8px;">${data.hatchDate?`현재 나이: ${ageLabel(data.hatchDate)}`:''}</div>
       <div class="field full">${buildCollapsibleChipGroup('ownPatterns', '패턴', PATTERN_TRAITS, data.morphPatterns||[])}</div>
       <div class="field full">${buildCollapsibleChipGroup('ownColors', '컬러/트레잇', COLOR_TRAITS, data.morphColors||[])}</div>
       <div class="readonly-note">${isNew?'저장하면 개체 ID가 자동으로 부여돼요 (수컷 HCC-M-0001 / 암컷 HCC-F-0001 형식).':`개체 ID: ${esc(data.id)} (자동 부여됨, 변경 불가)`}</div>
@@ -2520,6 +2548,7 @@ function openHatchlingForm(id, prefill){
         <label class="field"><span>헷(Het) 여부</span>${buildHetSelectHtml('hatch', data.morphHet||'')}</label>
       </div>
       <div class="readonly-note" style="margin-top:-6px;">인큐베이션 일수는 산란일·해칭일로 자동 계산돼요.</div>
+      <div class="readonly-note" id="hatchAgeNote" style="margin-top:-8px;">${data.hatchDate?`현재 나이: ${ageLabel(data.hatchDate)}`:''}</div>
       <div class="field full">${buildCollapsibleChipGroup('hatchPatterns', '패턴', PATTERN_TRAITS, data.morphPatterns||[])}</div>
       <div class="field full">${buildCollapsibleChipGroup('hatchColors', '컬러/트레잇', COLOR_TRAITS, data.morphColors||[])}</div>
       <div class="form-grid">
@@ -2559,6 +2588,10 @@ function updateHatchIncubationCalc(){
   const layEl = document.getElementById('hatchLayDateField');
   const hatchEl = document.getElementById('hatchHatchDateField');
   const daysEl = document.getElementById('hatchIncubationDaysField');
+  const ageEl = document.getElementById('hatchAgeNote');
+  if(ageEl && hatchEl){
+    ageEl.textContent = hatchEl.value ? `현재 나이: ${ageLabel(hatchEl.value)}` : '';
+  }
   if(!layEl || !hatchEl || !daysEl) return;
   if(layEl.value && hatchEl.value){
     const d = daysBetween(layEl.value, hatchEl.value);
@@ -3048,7 +3081,7 @@ function renderSoldTab(){
         ${r.salePlatform?`<span class="chip muted">${esc(r.salePlatform)}</span>`:''}
         ${r.kind==='individual'?`<span class="chip">개체</span>`:`<span class="chip muted">해칭개체</span>`}
       </div>
-      <div class="card-sub">부모 ${esc(r.parents)} · 해칭일 ${esc(r.hatchDate)||'-'} · 분양일 ${esc(r.saleDate)||'미입력'}</div>
+      <div class="card-sub">부모 ${esc(r.parents)} · 해칭일 ${esc(r.hatchDate)||'-'}${r.hatchDate?` (${ageLabel(r.hatchDate)})`:''} · 분양일 ${esc(r.saleDate)||'미입력'}</div>
     </div>`;
   });
 
