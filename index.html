@@ -1341,20 +1341,21 @@ function compressImageFile(file, maxDim, quality){
 }
 
 async function handlePhotoFileSelect(inputEl){
-  const file = inputEl.files && inputEl.files[0];
-  if(!file) return;
-  if(formPhotoState.photos.length>=3){ inputEl.value=''; return; }
-  let dataUrl;
-  try{
-    dataUrl = await compressImageFile(file, 480, 0.75);
-  }catch(e){
-    console.error('사진 처리 실패', e);
-    inputEl.value='';
-    return;
+  const files = inputEl.files;
+  if(!files || files.length===0) return;
+  for(let i=0; i<files.length; i++){
+    if(formPhotoState.photos.length>=3) break;
+    let dataUrl;
+    try{
+      dataUrl = await compressImageFile(files[i], 480, 0.75);
+    }catch(e){
+      console.error('사진 처리 실패', e);
+      continue;
+    }
+    const id = 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    formPhotoState.photos.push({id, dataUrl});
+    if(!formPhotoState.primaryId) formPhotoState.primaryId = id;
   }
-  const id = 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-  formPhotoState.photos.push({id, dataUrl});
-  if(!formPhotoState.primaryId) formPhotoState.primaryId = id;
   inputEl.value = '';
   renderPhotoStrip();
 }
@@ -1382,7 +1383,7 @@ function renderPhotoStrip(){
     </div>`;
   });
   if(formPhotoState.photos.length<3){
-    html += `<label class="photo-add">+<input type="file" accept="image/*" style="display:none;" onchange="handlePhotoFileSelect(this)"></label>`;
+    html += `<label class="photo-add">+<input type="file" accept="image/*" multiple style="display:none;" onchange="handlePhotoFileSelect(this)"></label>`;
   }
   html += `</div><div class="readonly-note" style="margin-top:6px;">최대 3장 · ★을 눌러 대표 사진(프로필용)을 지정하세요.</div>`;
   box.innerHTML = html;
