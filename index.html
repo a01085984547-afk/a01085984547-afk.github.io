@@ -162,6 +162,7 @@ main{padding:16px 16px 100px;}
 
 .pc-select-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center;margin-bottom:14px;}
 .pc-select-row .vs{font-family:var(--font-display);font-weight:600;color:var(--amber);font-size:13px;text-align:center;}
+.pc-select-btn{min-width:0;text-align:left;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:var(--surface);color:var(--ink);font-size:13px;font-family:var(--font-body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
 .tree-box{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 13px;font-size:12.5px;color:var(--ink-soft);margin-top:10px;line-height:1.7;}
 .tree-box b{color:var(--ink);}
 .disclaimer{font-size:11.5px;color:var(--ink-faint);line-height:1.6;margin-top:16px;background:var(--surface-2);border-radius:var(--radius-sm);padding:11px 13px;border:1px solid var(--border);}
@@ -2484,22 +2485,82 @@ function openEggDetail(clutchId, eggNum){
    혈통검사 탭
 ===================================================================== */
 
-function buildEntityOptions(selected){
-  let html = `<option value="">선택 안 함</option>`;
-  html += `<optgroup label="보유 개체">`;
-  state.individuals.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ko')).forEach(i=>{
-    const key = 'IND:'+i.id;
-    const morphLabel = formatMorphDisplayFull(i.morph, i.morphHet, i.morphPatterns, i.morphColors);
-    html += `<option value="${key}" ${key===selected?'selected':''}>${esc(i.name)||i.id} (${esc(i.gender)}${morphLabel?', '+esc(morphLabel):''})</option>`;
-  });
-  html += `</optgroup><optgroup label="해칭개체(미등록 포함)">`;
-  state.hatchlings.slice().sort((a,b)=>(a.id||'').localeCompare(b.id||'')).forEach(h=>{
-    const key = 'HAT:'+h.id;
-    const morphLabel = formatMorphDisplayFull(h.morph, h.morphHet, h.morphPatterns, h.morphColors) || '모프 미정';
-    html += `<option value="${key}" ${key===selected?'selected':''}>${esc(h.id)} (${esc(morphLabel)})</option>`;
-  });
-  html += `</optgroup>`;
-  return html;
+/* ---------------- 개체/해칭개체 검색 선택창(모달) ---------------- */
+let entityPickerState = { side:null, query:'', typeFilter:'' };
+
+function openEntityPicker(side){
+  entityPickerState = { side, query:'', typeFilter:'' };
+  renderEntityPickerModal();
+}
+function getEntityPickerList(){
+  const q = entityPickerState.query.trim().toLowerCase();
+  let items = [];
+  if(entityPickerState.typeFilter !== 'hatchling'){
+    state.individuals.forEach(i=>{
+      const morphLabel = formatMorphDisplayFull(i.morph, i.morphHet, i.morphPatterns, i.morphColors);
+      items.push({ key:'IND:'+i.id, kind:'individual', ent:i, label:i.name||i.id, sub:`${i.gender}${morphLabel?' · '+morphLabel:''}` });
+    });
+  }
+  if(entityPickerState.typeFilter !== 'individual'){
+    state.hatchlings.forEach(h=>{
+      const morphLabel = formatMorphDisplayFull(h.morph, h.morphHet, h.morphPatterns, h.morphColors) || '모프 미정';
+      items.push({ key:'HAT:'+h.id, kind:'hatchling', ent:h, label:morphLabel, sub:h.id });
+    });
+  }
+  if(q){
+    items = items.filter(it=>(it.label||'').toLowerCase().includes(q) || (it.sub||'').toLowerCase().includes(q) || (it.ent.id||'').toLowerCase().includes(q));
+  }
+  items.sort((a,b)=>(a.label||'').localeCompare(b.label||'','ko'));
+  return items;
+}
+function renderEntityPickerListHtml(items){
+  if(items.length===0) return `<div class="empty-state"><p>검색 결과가 없어요.</p></div>`;
+  return `<div class="compact-list" style="grid-template-columns:1fr;">` + items.map(it=>`
+    <div class="compact-row" onclick="pickEntity('${it.key}')">
+      ${avatarHtml(it.ent, it.kind, 34)}
+      <div class="compact-info">
+        <div class="compact-name">${esc(it.label)}</div>
+        <div class="compact-meta">${esc(it.sub)}</div>
+      </div>
+    </div>`).join('') + `</div>`;
+}
+function renderEntityPickerModal(){
+  const items = getEntityPickerList();
+  const body = `
+    <div class="searchbar">
+      <input id="entity-picker-search" placeholder="이름·ID·모프로 검색" value="${esc(entityPickerState.query)}" oninput="setEntityPickerQuery(this.value)">
+    </div>
+    <div class="searchbar">
+      <button type="button" class="chip-toggle ${entityPickerState.typeFilter===''?'chip-selected':''}" style="flex:1;" onclick="setEntityPickerType('')">전체</button>
+      <button type="button" class="chip-toggle ${entityPickerState.typeFilter==='individual'?'chip-selected':''}" style="flex:1;" onclick="setEntityPickerType('individual')">개체</button>
+      <button type="button" class="chip-toggle ${entityPickerState.typeFilter==='hatchling'?'chip-selected':''}" style="flex:1;" onclick="setEntityPickerType('hatchling')">해칭개체</button>
+    </div>
+    <div id="entity-picker-list" style="max-height:52vh;overflow-y:auto;margin-top:6px;">
+      ${renderEntityPickerListHtml(items)}
+    </div>
+  `;
+  openModal('개체 선택', body);
+}
+function setEntityPickerQuery(v){
+  entityPickerState.query = v;
+  const list = document.getElementById('entity-picker-list');
+  if(list) list.innerHTML = renderEntityPickerListHtml(getEntityPickerList());
+}
+function setEntityPickerType(v){
+  entityPickerState.typeFilter = v;
+  renderEntityPickerModal();
+}
+function pickEntity(key){
+  pedigreeSel[entityPickerState.side] = key;
+  closeModal();
+  renderMainOnly();
+}
+function pedigreeEntityLabel(key){
+  const ent = getEntityById(key);
+  if(!ent) return '개체 선택하기';
+  const morphLabel = formatMorphDisplayFull(ent.morph, ent.morphHet, ent.morphPatterns, ent.morphColors);
+  const name = ent.name || ent.morph || ent.id;
+  return morphLabel && ent.name ? `${name} · ${morphLabel}` : name;
 }
 
 function setPedigreeSel(side, value){
@@ -2513,9 +2574,9 @@ function renderPedigreeTab(){
   페어링을 고려 중인 두 개체를 선택하면, 등록된 부모 정보를 거슬러 올라가 공통 조상이 있는지 확인해드려요.
   </p>
   <div class="pc-select-row">
-    <select onchange="setPedigreeSel('a', this.value)">${buildEntityOptions(pedigreeSel.a)}</select>
+    <button type="button" class="pc-select-btn" onclick="openEntityPicker('a')">${esc(pedigreeSel.a?pedigreeEntityLabel(pedigreeSel.a):'개체 선택하기')}</button>
     <div class="vs">×</div>
-    <select onchange="setPedigreeSel('b', this.value)">${buildEntityOptions(pedigreeSel.b)}</select>
+    <button type="button" class="pc-select-btn" onclick="openEntityPicker('b')">${esc(pedigreeSel.b?pedigreeEntityLabel(pedigreeSel.b):'개체 선택하기')}</button>
   </div>`;
 
   if(pedigreeSel.a && pedigreeSel.b){
