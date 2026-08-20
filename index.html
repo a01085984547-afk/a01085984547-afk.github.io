@@ -1566,7 +1566,7 @@ async function handlePhotoFileSelect(inputEl){
     if(formPhotoState.photos.length>=3) break;
     let dataUrl;
     try{
-      dataUrl = await compressImageFile(files[i], 480, 0.75);
+      dataUrl = await compressImageFile(files[i], 720, 0.8);
     }catch(e){
       console.error('사진 처리 실패', e);
       continue;
@@ -1611,6 +1611,11 @@ function renderPhotoStrip(){
 /* ---------------- 사진 크게 보기(뷰어) ---------------- */
 let photoViewerState = { kind:null, id:null, index:0 };
 let photoViewerTouchX = null;
+let photoZoom = { scale:1, tx:0, ty:0 };
+let photoZoomPanStart = null;
+let photoZoomLastTap = 0;
+let photoZoomPinchStartDist = null;
+let photoZoomPinchStartScale = 1;
 
 function openPhotoViewer(kind, id, startIndex){
   const entity = kind==='individual' ? state.individuals.find(i=>i.id===id) : state.hatchlings.find(h=>h.id===id);
@@ -1633,10 +1638,12 @@ function renderPhotoViewer(){
   const photo = photos[idx];
   const isPrimary = photo.id === entity.primaryPhotoId;
   const label = entity.name || entity.morph || entity.id;
+  photoZoom = { scale:1, tx:0, ty:0 };
 
   const body = `
-    <div style="position:relative;" ontouchstart="photoViewerTouchStart(event)" ontouchend="photoViewerTouchEnd(event)">
-      <img src="${photo.dataUrl}" style="width:100%;border-radius:14px;display:block;background:var(--surface-2);">
+    <div style="position:relative;overflow:hidden;border-radius:14px;background:var(--surface-2);touch-action:none;"
+         ontouchstart="photoViewerImgTouchStart(event)" ontouchmove="photoViewerImgTouchMove(event)" ontouchend="photoViewerImgTouchEnd(event)">
+      <img id="photo-viewer-img" src="${photo.dataUrl}" style="width:100%;display:block;transform-origin:center center;">
       ${photos.length>1?`
         <button type="button" onclick="photoViewerNav(-1)" class="photo-viewer-nav" style="left:6px;">‹</button>
         <button type="button" onclick="photoViewerNav(1)" class="photo-viewer-nav" style="right:6px;">›</button>
@@ -1645,7 +1652,7 @@ function renderPhotoViewer(){
     ${photos.length>1?`<div style="display:flex;justify-content:center;gap:6px;margin-top:12px;">
       ${photos.map((p,i)=>`<span style="width:7px;height:7px;border-radius:50%;background:${i===idx?'var(--pine)':'var(--border)'};display:inline-block;"></span>`).join('')}
     </div>`:''}
-    <div style="text-align:center;font-size:12px;color:var(--ink-faint);margin-top:8px;">${idx+1} / ${photos.length}${isPrimary?' · 대표 사진 ★':''}</div>
+    <div style="text-align:center;font-size:12px;color:var(--ink-faint);margin-top:8px;">${idx+1} / ${photos.length}${isPrimary?' · 대표 사진 ★':''} · 두 번 탭하거나 두 손가락으로 확대</div>
   `;
   openModal(label, body);
 }
@@ -1653,14 +1660,69 @@ function photoViewerNav(delta){
   photoViewerState.index += delta;
   renderPhotoViewer();
 }
-function photoViewerTouchStart(e){
-  photoViewerTouchX = e.changedTouches[0].clientX;
+function applyPhotoZoom(){
+  const img = document.getElementById('photo-viewer-img');
+  if(!img) return;
+  img.style.transform = `translate(${photoZoom.tx}px, ${photoZoom.ty}px) scale(${photoZoom.scale})`;
 }
-function photoViewerTouchEnd(e){
-  if(photoViewerTouchX===null) return;
-  const dx = e.changedTouches[0].clientX - photoViewerTouchX;
-  photoViewerTouchX = null;
-  if(Math.abs(dx) > 40) photoViewerNav(dx < 0 ? 1 : -1);
+function touchDist(t0, t1){
+  return Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+}
+function photoViewerImgTouchStart(e){
+  if(e.touches.length===2){
+    photoZoomPinchStartDist = touchDist(e.touches[0], e.touches[1]);
+    photoZoomPinchStartScale = photoZoom.scale;
+    photoViewerTouchX = null;
+    return;
+  }
+  if(e.touches.length===1){
+    const now = Date.now();
+    if(now - photoZoomLastTap < 300){
+      // 더블탭: 확대<->원상태 토글
+      if(photoZoom.scale > 1){
+        photoZoom = { scale:1, tx:0, ty:0 };
+      } else {
+        photoZoom = { scale:2.2, tx:0, ty:0 };
+      }
+      applyPhotoZoom();
+      photoZoomLastTap = 0;
+      photoZoomPanStart = null;
+      return;
+    }
+    photoZoomLastTap = now;
+    if(photoZoom.scale > 1){
+      photoZoomPanStart = { x: e.touches[0].clientX - photoZoom.tx, y: e.touches[0].clientY - photoZoom.ty };
+    } else {
+      photoViewerTouchX = e.touches[0].clientX;
+    }
+  }
+}
+function photoViewerImgTouchMove(e){
+  if(e.touches.length===2 && photoZoomPinchStartDist){
+    const dist = touchDist(e.touches[0], e.touches[1]);
+    const next = photoZoomPinchStartScale * (dist / photoZoomPinchStartDist);
+    photoZoom.scale = Math.min(4, Math.max(1, next));
+    applyPhotoZoom();
+    return;
+  }
+  if(photoZoomPanStart && e.touches.length===1 && photoZoom.scale>1){
+    photoZoom.tx = e.touches[0].clientX - photoZoomPanStart.x;
+    photoZoom.ty = e.touches[0].clientY - photoZoomPanStart.y;
+    applyPhotoZoom();
+  }
+}
+function photoViewerImgTouchEnd(e){
+  photoZoomPinchStartDist = null;
+  photoZoomPanStart = null;
+  if(photoZoom.scale <= 1.02 && photoViewerTouchX !== null && e.changedTouches.length){
+    const dx = e.changedTouches[0].clientX - photoViewerTouchX;
+    photoViewerTouchX = null;
+    if(Math.abs(dx) > 40) photoViewerNav(dx < 0 ? 1 : -1);
+  }
+  if(photoZoom.scale < 1.05 && photoZoom.scale !== 1){
+    photoZoom = { scale:1, tx:0, ty:0 };
+    applyPhotoZoom();
+  }
 }
 
 function buildIndividualOptionsByGender(gender, selectedId){
