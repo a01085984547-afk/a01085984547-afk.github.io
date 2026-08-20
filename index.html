@@ -1536,13 +1536,13 @@ function openIndividualForm(id){
         <label class="field"><span>브리딩 여부</span><select name="breeding">${selOpts(['예','아니오','보류'],data.breeding)}</select></label>
         <label class="field"><span>메인 여부</span><select name="main">${selOpts(['예','아니오','보류'],data.main)}</select></label>
         <label class="field"><span>현재 상태</span><select name="status" id="ownStatusField" onchange="toggleSaleSection('own')">${selOpts(['보유','분양 중','분양 완료','사망','기타'],data.status)}</select></label>
+        <label class="field"><span>분양가</span><input type="number" name="salePrice" value="${data.salePrice??''}" min="0"></label>
       </div>
       <div id="ownSaleSection" style="display:${data.status==='분양 완료'?'block':'none'};">
         <div class="form-divider">분양 정보</div>
         <div class="form-grid">
           <label class="field"><span>분양 플랫폼</span>${buildSalePlatformSelectHtml('own', data.salePlatform||'')}</label>
           <label class="field"><span>분양일</span><input type="date" name="saleDate" value="${esc(data.saleDate||'')}"></label>
-          <label class="field"><span>분양가</span><input type="number" name="salePrice" value="${data.salePrice??''}" min="0"></label>
         </div>
       </div>
       <label class="field full"><span>메모</span><textarea name="memo">${esc(data.memo||'')}</textarea></label>
@@ -2312,6 +2312,7 @@ function openHatchlingForm(id, prefill){
       <div class="form-grid">
         <label class="field"><span>성별</span><select name="gender">${selOpts(['미구분','수컷','암컷'],data.gender)}</select></label>
         <label class="field"><span>점 여부</span><select name="dotStatus">${selOpts(['없음','있음','미상'],data.dotStatus)}</select></label>
+        <label class="field"><span>분양가</span><input type="number" name="price" value="${data.price??''}" min="0"></label>
         <label class="field"><span>킵 여부</span><select name="keep">${selOpts(['예','아니오','보류'],data.keep)}</select></label>
         <label class="field"><span>브리딩 여부</span><select name="breeding">${selOpts(['예','아니오','보류'],data.breeding)}</select></label>
         <label class="field"><span>메인 여부</span><select name="main">${selOpts(['예','아니오','보류'],data.main)}</select></label>
@@ -2322,7 +2323,6 @@ function openHatchlingForm(id, prefill){
         <div class="form-grid">
           <label class="field"><span>분양 플랫폼</span>${buildSalePlatformSelectHtml('hatch', data.salePlatform||'')}</label>
           <label class="field"><span>분양일</span><input type="date" name="saleDate" value="${esc(data.saleDate||'')}"></label>
-          <label class="field"><span>분양가</span><input type="number" name="price" value="${data.price??''}" min="0"></label>
         </div>
       </div>
       <label class="field full"><span>메모</span><textarea name="note">${esc(data.note||'')}</textarea></label>
