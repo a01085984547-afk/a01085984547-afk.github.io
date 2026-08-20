@@ -1153,7 +1153,7 @@ function renderIndividualList(){
         ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===individualSort?'selected':''}>${o.l}</option>`).join('')}
       </select>
       <select onchange="setIndividualHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
-        <option value="">전체보기</option>
+        <option value="">헷 여부</option>
         ${hetList.map(h=>`<option value="${esc(h)}" ${h===individualHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
       </select>
     </div>
@@ -1244,7 +1244,7 @@ function renderHatchlingList(){
         ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===hatchlingSort?'selected':''}>${o.l}</option>`).join('')}
       </select>
       <select onchange="setHatchlingHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
-        <option value="">전체보기</option>
+        <option value="">헷 여부</option>
         ${hetList.map(h=>`<option value="${esc(h)}" ${h===hatchlingHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
       </select>
     </div>
