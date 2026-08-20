@@ -975,6 +975,8 @@ function render(){
     <main id="main-content">${renderTabContent()}</main>
     ${renderFab()}
   `;
+  const activeTabBtn = app.querySelector('.tabbtn.active');
+  if(activeTabBtn) activeTabBtn.scrollIntoView({inline:'center', block:'nearest'});
 }
 
 function renderTabContent(){
@@ -1068,7 +1070,9 @@ function renderDashboard(){
 /* ---------------- 개체 목록 (검색 중 한글 조합이 끊기지 않도록 목록 영역만 갱신) ---------------- */
 function setIndividualSort(v){ individualSort = v; updateIndividualListBody(); }
 let individualMorphFilter = '';
+let individualHetFilter = '';
 function setIndividualMorphFilter(v){ individualMorphFilter = v; updateIndividualListBody(); }
+function setIndividualHetFilter(v){ individualHetFilter = v; updateIndividualListBody(); }
 function setIndividualFilter(v){ listFilters.individual = v; updateIndividualListBody(); }
 
 function getFilteredIndividuals(){
@@ -1079,6 +1083,9 @@ function getFilteredIndividuals(){
   }
   if(individualMorphFilter){
     items = items.filter(i=>i.morph===individualMorphFilter);
+  }
+  if(individualHetFilter){
+    items = items.filter(i=>individualHetFilter==='__none__' ? !i.morphHet : i.morphHet===individualHetFilter);
   }
   return items;
 }
@@ -1123,8 +1130,13 @@ function renderIndividualListBody(items){
 function renderIndividualList(){
   const items = getFilteredIndividuals();
   const morphCounts = {};
-  state.individuals.forEach(i=>{ if(i.morph) morphCounts[i.morph] = (morphCounts[i.morph]||0)+1; });
+  const hetCounts = {};
+  state.individuals.forEach(i=>{
+    if(i.morph) morphCounts[i.morph] = (morphCounts[i.morph]||0)+1;
+    if(i.morphHet) hetCounts[i.morphHet] = (hetCounts[i.morphHet]||0)+1;
+  });
   const morphList = Object.keys(morphCounts).sort((a,b)=>morphCounts[b]-morphCounts[a]);
+  const hetList = HET_OPTIONS.filter(h=>h!=='없음');
   const sortOptions = [
     {v:'age_desc',l:'개월순(나이 많은순)'},
     {v:'age_asc',l:'개월순(어린순)'},
@@ -1140,6 +1152,12 @@ function renderIndividualList(){
       <select onchange="setIndividualSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===individualSort?'selected':''}>${o.l}</option>`).join('')}
       </select>
+      <select onchange="setIndividualHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">전체보기</option>
+        ${hetList.map(h=>`<option value="${esc(h)}" ${h===individualHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="searchbar">
       <select onchange="setIndividualMorphFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         <option value="">모프 전체 보기</option>
         ${morphList.map(m=>`<option value="${esc(m)}" ${m===individualMorphFilter?'selected':''}>${esc(m)} (${morphCounts[m]}마리)</option>`).join('')}
@@ -1151,6 +1169,8 @@ function renderIndividualList(){
 /* ---------------- 해칭개체 목록 ---------------- */
 function setHatchlingSort(v){ hatchlingSort = v; updateHatchlingListBody(); }
 function setHatchlingMorphFilter(v){ hatchlingMorphFilter = v; updateHatchlingListBody(); }
+let hatchlingHetFilter = '';
+function setHatchlingHetFilter(v){ hatchlingHetFilter = v; updateHatchlingListBody(); }
 function setHatchlingFilter(v){ listFilters.hatchling = v; updateHatchlingListBody(); }
 
 function getFilteredHatchlings(){
@@ -1161,6 +1181,9 @@ function getFilteredHatchlings(){
   }
   if(hatchlingMorphFilter){
     items = items.filter(h=>h.morph===hatchlingMorphFilter);
+  }
+  if(hatchlingHetFilter){
+    items = items.filter(h=>hatchlingHetFilter==='__none__' ? !h.morphHet : h.morphHet===hatchlingHetFilter);
   }
   return items;
 }
@@ -1199,8 +1222,13 @@ function renderHatchlingListBody(items){
 function renderHatchlingList(){
   const items = getFilteredHatchlings();
   const morphCounts = {};
-  state.hatchlings.forEach(h=>{ if(h.morph) morphCounts[h.morph] = (morphCounts[h.morph]||0)+1; });
+  const hetCounts = {};
+  state.hatchlings.forEach(h=>{
+    if(h.morph) morphCounts[h.morph] = (morphCounts[h.morph]||0)+1;
+    if(h.morphHet) hetCounts[h.morphHet] = (hetCounts[h.morphHet]||0)+1;
+  });
   const morphList = Object.keys(morphCounts).sort((a,b)=>morphCounts[b]-morphCounts[a]);
+  const hetList = HET_OPTIONS.filter(h=>h!=='없음');
   const sortOptions = [
     {v:'age_desc',l:'개월순(최신 해칭)'},
     {v:'age_asc',l:'개월순(오래된 해칭)'},
@@ -1215,6 +1243,12 @@ function renderHatchlingList(){
       <select onchange="setHatchlingSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===hatchlingSort?'selected':''}>${o.l}</option>`).join('')}
       </select>
+      <select onchange="setHatchlingHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">전체보기</option>
+        ${hetList.map(h=>`<option value="${esc(h)}" ${h===hatchlingHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="searchbar">
       <select onchange="setHatchlingMorphFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         <option value="">모프 전체 보기</option>
         ${morphList.map(m=>`<option value="${esc(m)}" ${m===hatchlingMorphFilter?'selected':''}>${esc(m)} (${morphCounts[m]}마리)</option>`).join('')}
