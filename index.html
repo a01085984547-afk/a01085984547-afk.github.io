@@ -68,6 +68,22 @@ main{padding:16px 16px 100px;}
 .chip.muted{background:#EEEBDF;color:var(--ink-soft);}
 .chip.danger{background:var(--danger-soft);color:var(--danger);}
 .card-sub{font-size:12.5px;color:var(--ink-soft);margin-top:8px;line-height:1.5;}
+.compact-list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);}
+.compact-row{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);}
+.compact-row:last-child{border-bottom:none;}
+.compact-row:active{background:var(--surface-2);}
+.compact-info{min-width:0;flex:1;}
+.compact-name{font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.compact-sub{font-size:11px;color:var(--ink-faint);font-weight:500;font-family:var(--font-body);}
+.compact-meta{font-size:11.5px;color:var(--ink-soft);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.exit-toast{
+  position:fixed;left:50%;bottom:90px;transform:translateX(-50%);
+  background:rgba(18,29,20,0.92);color:#fff;padding:10px 18px;border-radius:999px;
+  font-size:13px;font-weight:600;font-family:var(--font-body);z-index:999;
+  box-shadow:0 4px 14px rgba(0,0,0,0.25);pointer-events:none;
+  opacity:1;transition:opacity .3s;white-space:nowrap;
+}
+.exit-toast-out{opacity:0;}
 .card-datarow{display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);}
 .card-datarow .dcell{text-align:left;}
 .card-datarow .dcell .lbl{font-size:10.5px;color:var(--ink-faint);font-weight:600;}
@@ -1148,18 +1164,43 @@ function updateIndividualListBody(){
   if(count) count.textContent = `${items.length} / ${state.individuals.length}마리`;
 }
 
-function avatarHtml(entity, kind){
+function avatarHtml(entity, kind, size){
   const photos = entity.photos || [];
-  if(photos.length===0) return `<div class="card-avatar-placeholder">🦎</div>`;
+  const sizeAttr = size ? ` style="width:${size}px;height:${size}px;"` : '';
+  if(photos.length===0) return `<div class="card-avatar-placeholder"${sizeAttr}>🦎</div>`;
   const primaryIdx = Math.max(0, photos.findIndex(p=>p.id===entity.primaryPhotoId));
   const photo = photos[primaryIdx] || photos[0];
-  if(!kind) return `<img src="${photo.dataUrl}" class="card-avatar">`;
-  return `<img src="${photo.dataUrl}" class="card-avatar" onclick="event.stopPropagation(); openPhotoViewer('${kind}','${entity.id}', ${primaryIdx})">`;
+  if(!kind) return `<img src="${photo.dataUrl}" class="card-avatar"${sizeAttr}>`;
+  return `<img src="${photo.dataUrl}" class="card-avatar"${sizeAttr} onclick="event.stopPropagation(); openPhotoViewer('${kind}','${entity.id}', ${primaryIdx})">`;
+}
+
+let individualViewMode = 'card';
+function setIndividualViewMode(v){
+  individualViewMode = v;
+  updateIndividualListBody();
+  const cardBtn = document.getElementById('individual-view-card-btn');
+  const compactBtn = document.getElementById('individual-view-compact-btn');
+  if(cardBtn) cardBtn.classList.toggle('chip-selected', v==='card');
+  if(compactBtn) compactBtn.classList.toggle('chip-selected', v==='compact');
+}
+
+function renderIndividualCompactRow(i){
+  const morphLabel = formatMorphFull(i.morph, i.morphHet).main;
+  return `<div class="compact-row" onclick="openIndividualForm('${i.id}')">
+    ${avatarHtml(i, 'individual', 34)}
+    <div class="compact-info">
+      <div class="compact-name">${esc(i.name)||'(이름없음)'}${morphLabel?` <span class="compact-sub">${esc(morphLabel)}</span>`:''}</div>
+      <div class="compact-meta">${esc(i.gender)||'-'} · ${esc(i.status)||'-'}${i.salePrice?(' · '+fmtMoney(i.salePrice)):''}</div>
+    </div>
+  </div>`;
 }
 
 function renderIndividualListBody(items){
   if(items.length===0){
     return `<div class="empty-state"><div class="dotrow"><span></span><span></span><span></span><span></span><span></span></div><p>등록된 개체가 없어요.<br>오른쪽 아래 + 버튼으로 추가해보세요.</p></div>`;
+  }
+  if(individualViewMode==='compact'){
+    return `<div class="compact-list">${items.map(renderIndividualCompactRow).join('')}</div>`;
   }
   return items.map(i=>`<div class="card" onclick="openIndividualForm('${i.id}')">
     <div class="card-top">
@@ -1200,6 +1241,10 @@ function renderIndividualList(){
     {v:'gender',l:'성별순'}
   ];
   return `<div class="section-head"><h2>개체 관리</h2><span class="count" id="individual-count">${items.length} / ${state.individuals.length}마리</span></div>
+    <div class="searchbar">
+      <button type="button" id="individual-view-card-btn" class="chip-toggle ${individualViewMode==='card'?'chip-selected':''}" style="flex:1;" onclick="setIndividualViewMode('card')">카드형</button>
+      <button type="button" id="individual-view-compact-btn" class="chip-toggle ${individualViewMode==='compact'?'chip-selected':''}" style="flex:1;" onclick="setIndividualViewMode('compact')">간단히 보기</button>
+    </div>
     <div class="searchbar">
       <input placeholder="이름·ID·모프로 검색" value="${esc(listFilters.individual)}" oninput="setIndividualFilter(this.value)">
     </div>
@@ -1254,9 +1299,32 @@ function updateHatchlingListBody(){
   if(count) count.textContent = `${items.length} / ${state.hatchlings.length}마리`;
 }
 
+let hatchlingViewMode = 'card';
+function setHatchlingViewMode(v){
+  hatchlingViewMode = v;
+  updateHatchlingListBody();
+  const cardBtn = document.getElementById('hatchling-view-card-btn');
+  const compactBtn = document.getElementById('hatchling-view-compact-btn');
+  if(cardBtn) cardBtn.classList.toggle('chip-selected', v==='card');
+  if(compactBtn) compactBtn.classList.toggle('chip-selected', v==='compact');
+}
+
+function renderHatchlingCompactRow(h){
+  return `<div class="compact-row" onclick="openHatchlingForm('${h.id}')">
+    ${avatarHtml(h, 'hatchling', 34)}
+    <div class="compact-info">
+      <div class="compact-name">${esc(h.morph)||'모프 미정'}${h.morphHet?` <span class="compact-sub">${esc(formatHetDisplay(h.morphHet))}</span>`:''}</div>
+      <div class="compact-meta">${esc(h.gender)||'-'} · ${esc(h.status)||'-'}${h.price?(' · '+fmtMoney(h.price)):''}</div>
+    </div>
+  </div>`;
+}
+
 function renderHatchlingListBody(items){
   if(items.length===0){
     return `<div class="empty-state"><p>등록된 해칭개체가 없어요.</p></div>`;
+  }
+  if(hatchlingViewMode==='compact'){
+    return `<div class="compact-list">${items.map(renderHatchlingCompactRow).join('')}</div>`;
   }
   return items.map(h=>`<div class="card" onclick="openHatchlingForm('${h.id}')">
     <div class="card-top">
@@ -1302,6 +1370,10 @@ function renderHatchlingList(){
     {v:'id_asc',l:'고유번호 오름차순'}
   ];
   return `<div class="section-head"><h2>해칭개체</h2><span class="count" id="hatchling-count">${items.length} / ${state.hatchlings.length}마리</span></div>
+    <div class="searchbar">
+      <button type="button" id="hatchling-view-card-btn" class="chip-toggle ${hatchlingViewMode==='card'?'chip-selected':''}" style="flex:1;" onclick="setHatchlingViewMode('card')">카드형</button>
+      <button type="button" id="hatchling-view-compact-btn" class="chip-toggle ${hatchlingViewMode==='compact'?'chip-selected':''}" style="flex:1;" onclick="setHatchlingViewMode('compact')">간단히 보기</button>
+    </div>
     <div class="searchbar"><input placeholder="ID·모프·모(母) 이름으로 검색" value="${esc(listFilters.hatchling)}" oninput="setHatchlingFilter(this.value)"></div>
     <div class="searchbar">
       <select onchange="setHatchlingSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
@@ -1342,21 +1414,53 @@ function openModal(title, bodyHtml){
      모달이 열릴 때 히스토리를 하나 쌓아둔다(이미 모달이 열려있던 상태에서
      내용만 바뀌는 경우는 새로 쌓지 않음 - 예: 개체수정 안에서 가계도 보기). */
   if(!wasOpen){
-    try{ history.pushState({modalOpen:true}, ''); }catch(e){}
+    pushBackGuard();
   }
 }
 function closeModal(){
-  if(window.history.state && window.history.state.modalOpen){
-    history.back(); // popstate 핸들러가 실제로 닫아줌
-  } else {
-    closeModalUiOnly();
-  }
+  history.back(); // popstate 핸들러가 실제로 닫아줌
 }
 function closeModalUiOnly(){
   document.getElementById('modal-root').innerHTML = '';
 }
+
+/* ---------------- 뒤로가기 처리: 모달 중이면 모달만 닫고, 메인 화면이면 "두 번 눌러 종료" ---------------- */
+function pushBackGuard(){
+  try{ history.pushState({guard:Date.now()}, ''); }catch(e){}
+}
+let exitArmed = false;
+let exitArmTimer = null;
+function showExitToast(){
+  const old = document.getElementById('exit-toast');
+  if(old) old.remove();
+  const toast = document.createElement('div');
+  toast.id = 'exit-toast';
+  toast.className = 'exit-toast';
+  toast.textContent = '뒤로 버튼을 한 번 더 누르면 종료돼요';
+  document.body.appendChild(toast);
+  setTimeout(()=>{
+    toast.classList.add('exit-toast-out');
+    setTimeout(()=>toast.remove(), 300);
+  }, 1600);
+}
 window.addEventListener('popstate', function(){
-  closeModalUiOnly();
+  const modalWasOpen = document.getElementById('modal-root').innerHTML.trim().length > 0;
+  if(modalWasOpen){
+    closeModalUiOnly();
+    pushBackGuard();
+    return;
+  }
+  if(!exitArmed){
+    exitArmed = true;
+    showExitToast();
+    clearTimeout(exitArmTimer);
+    exitArmTimer = setTimeout(()=>{ exitArmed = false; }, 2000);
+    pushBackGuard();
+  } else {
+    clearTimeout(exitArmTimer);
+    exitArmed = false;
+    history.back(); // 남은 마지막 기록도 소모시켜 실제로 앱이 종료되게 함
+  }
 });
 
 function selOpts(options, current){
@@ -2704,7 +2808,7 @@ function renderSettingsTab(){
     html += `<button class="btn btn-ghost btn-block" style="margin-top:12px;" onclick="openSyncSetupForm()">동기화 설정 다시 보기</button>`;
     html += `<button class="btn btn-danger btn-block" style="margin-top:8px;" onclick="disableSync()">동기화 끄기(이 기기 분리)</button>`;
   } else {
-    html += `<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="openSyncSetupForm()">동기화 설정하기 (배우자와 공유)</button>`;
+    html += `<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="openSyncSetupForm()">동기화 설정하기</button>`;
   }
 
   html += `<div class="disclaimer" style="margin-top:16px;">동기화를 켜면 무료 Firebase(구글) 프로젝트에 데이터가 저장되고, 같은 설정값을 입력한 기기끼리 실시간으로 데이터를 공유해요. 설정을 안 하면 지금처럼 이 기기에만 저장돼요.</div>`;
@@ -2965,6 +3069,7 @@ function renderSoldTab(){
     await initSync();
   }
   render();
+  pushBackGuard();
 })();
 
 </script>
