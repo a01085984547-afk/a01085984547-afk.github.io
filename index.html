@@ -136,6 +136,7 @@ main{padding:16px 16px 100px;}
 .photo-thumb-wrap{position:relative;width:72px;height:72px;}
 .photo-thumb{width:72px;height:72px;object-fit:cover;border-radius:12px;border:2px solid var(--border);display:block;}
 .photo-thumb.is-primary{border-color:var(--amber);}
+.photo-thumb-loading{display:flex;align-items:center;justify-content:center;background:var(--surface-2);font-size:22px;}
 .photo-star{position:absolute;top:-7px;left:-7px;width:22px;height:22px;border-radius:50%;border:none;background:#fff;color:var(--ink-faint);font-size:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.2);line-height:1;padding:0;}
 .photo-star.active{background:var(--amber);color:#fff;}
 .photo-remove{position:absolute;top:-7px;right:-7px;width:20px;height:20px;border-radius:50%;border:none;background:var(--danger);color:#fff;font-size:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.2);line-height:1;padding:0;}
@@ -1564,19 +1565,43 @@ async function handlePhotoFileSelect(inputEl){
   if(!files || files.length===0) return;
   for(let i=0; i<files.length; i++){
     if(formPhotoState.photos.length>=3) break;
+    const tempId = 'temp'+Date.now()+i;
+    formPhotoState.photos.push({id:tempId, loading:true});
+    renderPhotoStrip();
     let dataUrl;
     try{
-      dataUrl = await compressImageFile(files[i], 720, 0.8);
+      dataUrl = await compressImageFileAdaptive(files[i]);
     }catch(e){
       console.error('사진 처리 실패', e);
+      formPhotoState.photos = formPhotoState.photos.filter(p=>p.id!==tempId);
+      renderPhotoStrip();
       continue;
     }
     const id = 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-    formPhotoState.photos.push({id, dataUrl});
+    const idx = formPhotoState.photos.findIndex(p=>p.id===tempId);
+    if(idx>=0) formPhotoState.photos[idx] = {id, dataUrl};
     if(!formPhotoState.primaryId) formPhotoState.primaryId = id;
+    renderPhotoStrip();
   }
   inputEl.value = '';
-  renderPhotoStrip();
+}
+
+/* 동기화(Firebase)가 켜져있으면 Storage에 고화질로 업로드해서 그 주소(URL)를 쓰고,
+   꺼져있거나 업로드가 실패하면 이 기기에만 저장되는 압축 이미지로 대체한다. */
+async function compressImageFileAdaptive(file){
+  const localDataUrl = await compressImageFile(file, 720, 0.8);
+  if(getFirebaseConfig()){
+    try{
+      const hiResDataUrl = await compressImageFile(file, 1600, 0.88);
+      const blob = await (await fetch(hiResDataUrl)).blob();
+      const filename = 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,8)+'.jpg';
+      const url = await uploadPhotoBlob(blob, filename);
+      if(url) return url;
+    }catch(e){
+      console.error('고화질 업로드 실패, 이 기기 저장용 화질로 대체', e);
+    }
+  }
+  return localDataUrl;
 }
 function removePhoto(id){
   formPhotoState.photos = formPhotoState.photos.filter(p=>p.id!==id);
@@ -1594,6 +1619,10 @@ function renderPhotoStrip(){
   if(!box) return;
   let html = `<div class="photo-row">`;
   formPhotoState.photos.forEach(p=>{
+    if(p.loading){
+      html += `<div class="photo-thumb-wrap"><div class="photo-thumb photo-thumb-loading">⏳</div></div>`;
+      return;
+    }
     const isPrimary = p.id===formPhotoState.primaryId;
     html += `<div class="photo-thumb-wrap">
       <img src="${p.dataUrl}" class="photo-thumb ${isPrimary?'is-primary':''}">
@@ -1604,7 +1633,7 @@ function renderPhotoStrip(){
   if(formPhotoState.photos.length<3){
     html += `<label class="photo-add">+<input type="file" accept="image/*" multiple style="display:none;" onchange="handlePhotoFileSelect(this)"></label>`;
   }
-  html += `</div><div class="readonly-note" style="margin-top:6px;">최대 3장 · ★을 눌러 대표 사진(프로필용)을 지정하세요.</div>`;
+  html += `</div><div class="readonly-note" style="margin-top:6px;">최대 3장 · ★을 눌러 대표 사진(프로필용)을 지정하세요.${getFirebaseConfig()?' 동기화 연결되어 있어 고화질로 클라우드에 저장돼요.':''}</div>`;
   box.innerHTML = html;
 }
 
@@ -1958,12 +1987,26 @@ function toggleShowEndedMatings(){ showEndedMatings = !showEndedMatings; updateM
 let matingSort = 'recent';
 function setMatingSort(v){ matingSort = v; updateMatingListBody(); }
 
+const MATING_SORTERS = {
+  recent: (a,b)=>(latestMatingDate(b)||'').localeCompare(latestMatingDate(a)||''),
+  old: (a,b)=>(latestMatingDate(a)||'').localeCompare(latestMatingDate(b)||''),
+  lay_soon: (a,b)=>{
+    const da = matingDdayInfo(a), db = matingDdayInfo(b);
+    const va = da.mode==='predicted' ? da.diff : Infinity;
+    const vb = db.mode==='predicted' ? db.diff : Infinity;
+    return va - vb;
+  },
+  lay_far: (a,b)=>{
+    const da = matingDdayInfo(a), db = matingDdayInfo(b);
+    const va = da.mode==='predicted' ? da.diff : -Infinity;
+    const vb = db.mode==='predicted' ? db.diff : -Infinity;
+    return vb - va;
+  }
+};
+
 function getFilteredMatings(){
   const q = listFilters.mating.trim().toLowerCase();
-  let items = state.matings.slice().sort((a,b)=>{
-    const av = latestMatingDate(a)||''; const bv = latestMatingDate(b)||'';
-    return matingSort==='old' ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
+  let items = state.matings.slice().sort(MATING_SORTERS[matingSort] || MATING_SORTERS.recent);
   if(!showEndedMatings){
     items = items.filter(m=>normalizeMatingStatus(m.status)!=='산란 종료');
   }
@@ -2000,6 +2043,8 @@ function renderMatingList(){
       <select onchange="setMatingSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         <option value="recent" ${matingSort==='recent'?'selected':''}>최근 메이팅일 최신순</option>
         <option value="old" ${matingSort==='old'?'selected':''}>최근 메이팅일 오래된순</option>
+        <option value="lay_soon" ${matingSort==='lay_soon'?'selected':''}>산란 예정일 가까운순</option>
+        <option value="lay_far" ${matingSort==='lay_far'?'selected':''}>산란 예정일 많이 남은순</option>
       </select>
     </div>
     ${endedCount>0?`<div class="searchbar"><button type="button" id="mating-ended-toggle" class="chip-toggle${showEndedMatings?' chip-selected':''}" onclick="toggleShowEndedMatings()">${showEndedMatings?'종료 같이 보는 중 ✓':'종료 같이 보기'}</button></div>`:''}
@@ -2927,6 +2972,40 @@ async function pushStateToCloud(){
   }catch(e){
     console.error('클라우드 업로드 실패', e);
     suppressNextSnapshot = false;
+  }
+}
+
+/* ---------------- Firebase Storage: 사진은 여기에 원본에 가깝게 저장하고, Firestore엔 주소만 저장 ---------------- */
+let firebaseStorageReady = false;
+async function ensureStorageReady(){
+  if(firebaseStorageReady) return true;
+  const cfg = getFirebaseConfig();
+  if(!cfg) return false;
+  try{
+    await loadScriptOnce('https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js');
+    if(!firebase.apps || firebase.apps.length===0){
+      firebase.initializeApp(cfg);
+    }
+    if(!firebase.auth().currentUser){
+      await firebase.auth().signInAnonymously();
+    }
+    firebaseStorageReady = true;
+    return true;
+  }catch(e){
+    console.error('Storage 준비 실패', e);
+    return false;
+  }
+}
+async function uploadPhotoBlob(blob, filename){
+  const ok = await ensureStorageReady();
+  if(!ok) return null;
+  try{
+    const ref = firebase.storage().ref('photos/'+filename);
+    await ref.put(blob);
+    return await ref.getDownloadURL();
+  }catch(e){
+    console.error('사진 업로드 실패', e);
+    return null;
   }
 }
 
