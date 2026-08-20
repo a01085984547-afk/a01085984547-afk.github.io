@@ -146,6 +146,18 @@ main{padding:16px 16px 100px;}
 .tree-box{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 13px;font-size:12.5px;color:var(--ink-soft);margin-top:10px;line-height:1.7;}
 .tree-box b{color:var(--ink);}
 .disclaimer{font-size:11.5px;color:var(--ink-faint);line-height:1.6;margin-top:16px;background:var(--surface-2);border-radius:var(--radius-sm);padding:11px 13px;border:1px solid var(--border);}
+.ped-tree-wrap{margin-top:14px;}
+.ped-tree-title{font-family:var(--font-display);font-weight:600;font-size:15px;color:var(--pine-deep);margin-bottom:8px;}
+.ped-tree{padding:2px 0;}
+.ped-box{display:flex;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin:6px 0;box-shadow:var(--shadow);}
+.ped-box-named{background:var(--surface-2);box-shadow:none;padding:7px 12px;}
+.ped-avatar-placeholder{width:34px;height:34px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--ink-faint);}
+.ped-info{min-width:0;}
+.ped-name{font-weight:700;font-size:13px;color:var(--ink);}
+.ped-side{font-size:10.5px;font-weight:700;color:var(--amber);background:var(--amber-soft);padding:1px 6px;border-radius:999px;margin-right:2px;}
+.ped-morph{font-size:11px;color:var(--ink-soft);margin-top:1px;}
+.ped-tag{font-size:9.5px;font-weight:700;background:var(--caution-soft);color:var(--caution);padding:1px 6px;border-radius:999px;margin-left:2px;}
+.ped-children{margin-left:20px;padding-left:14px;border-left:2px solid var(--border);}
 .badge-link{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:var(--moss);background:var(--moss-soft);padding:5px 10px;border-radius:999px;}
 
 /* ---------- mating card (accordion) ---------- */
@@ -1477,6 +1489,7 @@ function openIndividualForm(id){
       <div class="field full">${buildCollapsibleChipGroup('ownPatterns', '패턴', PATTERN_TRAITS, data.morphPatterns||[])}</div>
       <div class="field full">${buildCollapsibleChipGroup('ownColors', '컬러/트레잇', COLOR_TRAITS, data.morphColors||[])}</div>
       <div class="readonly-note">${isNew?'저장하면 개체 ID가 자동으로 부여돼요 (수컷 HCC-M-0001 / 암컷 HCC-F-0001 형식).':`개체 ID: ${esc(data.id)} (자동 부여됨, 변경 불가)`}</div>
+      ${!isNew?`<button type="button" class="btn btn-ghost btn-block" style="margin-bottom:12px;" onclick="openPedigreeTreeModal('IND:${data.id}')">🌳 가계도 보기</button>`:''}
       ${(!isNew && data.id && idGenderPrefixOf(data.id)!==genderIdPrefix(data.gender)) ? `
         <div class="bloodline-banner warning">⚠️ 현재 성별(${esc(data.gender)})과 ID 접두사가 안 맞아요. ID는 지우고 새로 등록하지 않아도, 아래 버튼으로 안전하게 바꿀 수 있어요.</div>
         <button type="button" class="btn btn-ghost btn-block" style="margin-bottom:10px;" onclick="reissueIndividualId('${data.id}')">ID 다시 발급하기 (참조 자동 갱신)</button>
@@ -2152,29 +2165,62 @@ function renderPedigreeTab(){
 }
 
 function renderPedigreeTree(ent, label){
-  const lines = [];
-  function walk(e, gen, prefix){
-    if(gen>3) return;
-    ['sire','dam'].forEach(side=>{
-      const ref = parentRef(e, side);
-      const sideLabel = side==='sire' ? '부' : '모';
-      if(!ref){
+  const html = renderPedigreeVisualNode(ent, '', 0, 3);
+  return `<div class="ped-tree-wrap">
+    <div class="ped-tree-title">${esc(label)}의 가계도</div>
+    <div class="ped-tree">${html}</div>
+  </div>`;
+}
+
+/* 재귀적으로 부/모를 따라가며 카드형 가계도를 그린다 (최대 3대: 부모/조부모/증조부모) */
+function renderPedigreeVisualNode(ent, sideLabel, gen, maxGen){
+  if(!ent) return '';
+  const morphLabel = formatMorphDisplayFull(ent.morph, ent.morphHet, ent.morphPatterns, ent.morphColors);
+  const box = `<div class="ped-box">
+    ${avatarHtml(ent)}
+    <div class="ped-info">
+      <div class="ped-name">${sideLabel?`<span class="ped-side">${esc(sideLabel)}</span> `:''}${esc(ent.name||ent.morph||ent.id)}</div>
+      <div class="ped-morph">${esc(morphLabel)||'모프 미상'}${ent.gender?' · '+esc(ent.gender):''}</div>
+    </div>
+  </div>`;
+  if(gen>=maxGen) return box;
+
+  let childrenHtml = '';
+  ['sire','dam'].forEach(side=>{
+    const ref = parentRef(ent, side);
+    const sideKo = side==='sire' ? '부' : '모';
+    if(!ref){
+      return;
+    }
+    if(ref.type==='linked'){
+      const linkedInd = state.individuals.find(i=>i.id===ref.id);
+      if(linkedInd){
+        childrenHtml += renderPedigreeVisualNode(linkedInd, sideKo, gen+1, maxGen);
         return;
       }
-      const name = e[side+'Name'] || '?';
-      const linked = ref.type==='linked';
-      lines.push(`${'&nbsp;'.repeat(prefix*3)}└ ${sideLabel}: <b>${esc(name)}</b> ${linked?'(등록 개체)':'(이름만 등록)'}`);
-      if(linked){
-        const nextInd = state.individuals.find(i=>i.id===ref.id);
-        if(nextInd) walk(nextInd, gen+1, prefix+1);
-      }
-    });
-  }
-  walk(ent, 0, 0);
-  if(lines.length===0){
-    lines.push('등록된 부모 정보가 없습니다.');
-  }
-  return `<div class="tree-box"><b>${esc(label)}의 계보</b><br>${lines.join('<br>')}</div>`;
+    }
+    const nm = ent[side+'Name'];
+    if(nm){
+      childrenHtml += `<div class="ped-box ped-box-named">
+        <div class="ped-avatar-placeholder">❔</div>
+        <div class="ped-info">
+          <div class="ped-name"><span class="ped-side">${esc(sideKo)}</span> ${esc(nm)}</div>
+          <div class="ped-morph">${ent[side+'Company']?esc(ent[side+'Company']):''} <span class="ped-tag">미등록</span></div>
+        </div>
+      </div>`;
+    }
+  });
+  if(!childrenHtml) return box;
+  return box + `<div class="ped-children">${childrenHtml}</div>`;
+}
+
+/* 개체 폼 등에서 단독으로 여는 가계도 모달 */
+function openPedigreeTreeModal(compositeId){
+  const ent = getEntityById(compositeId);
+  if(!ent) return;
+  const label = ent.name || ent.morph || ent.id;
+  const body = renderPedigreeTree(ent, label) + `<div class="disclaimer" style="margin-top:14px;">등록된 부모 정보를 기준으로 최대 3대(부모·조부모·증조부모)까지 보여줘요. 점선 없이 옅은 박스는 이름만 등록된(개체로 연결 안 된) 조상이에요.</div>`;
+  openModal('가계도', body);
 }
 /* =====================================================================
    해칭개체(hatchling) 폼 + "개체로 등록" 승격 기능
@@ -2277,6 +2323,7 @@ function openHatchlingForm(id, prefill){
         </div>
       </div>
       <label class="field full"><span>메모</span><textarea name="note">${esc(data.note||'')}</textarea></label>
+      ${!isNew?`<button type="button" class="btn btn-ghost btn-block" onclick="openPedigreeTreeModal('HAT:${data.id}')">🌳 가계도 보기</button>`:''}
 
       ${promoteBlock}
 
@@ -2549,6 +2596,13 @@ function renderSettingsTab(){
 
   html += `<div class="disclaimer" style="margin-top:16px;">동기화를 켜면 무료 Firebase(구글) 프로젝트에 데이터가 저장되고, 같은 설정값을 입력한 기기끼리 실시간으로 데이터를 공유해요. 설정을 안 하면 지금처럼 이 기기에만 저장돼요.</div>`;
 
+  html += `<div class="section-head" style="margin-top:22px;"><h2 style="font-size:15px;">데이터 백업</h2></div>
+  <div class="card"><div class="card-sub">개체 ${state.individuals.length}마리 · 메이팅 ${state.matings.length}건 · 알 ${state.clutches.length}건 · 해칭개체 ${state.hatchlings.length}마리 저장되어 있어요.</div></div>
+  <button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="exportBackup()">📥 데이터 내보내기 (백업)</button>
+  <button class="btn btn-ghost btn-block" style="margin-top:8px;" onclick="triggerImportBackup()">📤 백업 파일 가져오기 (복원)</button>
+  <input type="file" id="backup-import-input" accept="application/json" style="display:none;" onchange="handleImportBackup(this)">
+  <div class="disclaimer" style="margin-top:12px;">이 앱은 폰 안에만 저장되기 때문에, 폰을 바꾸거나 데이터가 지워지면 복구할 방법이 없어요. 가끔 "내보내기"로 파일을 받아서 구글 드라이브나 이메일에 저장해두시면, 나중에 "가져오기"로 사진까지 포함해서 그대로 복원할 수 있어요.</div>`;
+
   html += `<div class="section-head" style="margin-top:22px;"><h2 style="font-size:15px;">앱 정보</h2></div>
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
@@ -2556,6 +2610,52 @@ function renderSettingsTab(){
   </div></div>`;
 
   return html;
+}
+
+function exportBackup(){
+  try{
+    const payload = JSON.stringify(state, null, 2);
+    const blob = new Blob([payload], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `hotchoco_backup_${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 3000);
+  }catch(e){
+    alert('내보내기 실패: '+e.message);
+  }
+}
+
+function triggerImportBackup(){
+  const el = document.getElementById('backup-import-input');
+  if(el) el.click();
+}
+
+async function handleImportBackup(inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const validShape = parsed && Array.isArray(parsed.individuals) && Array.isArray(parsed.matings) && Array.isArray(parsed.clutches) && Array.isArray(parsed.hatchlings);
+    if(!validShape){
+      alert('올바른 백업 파일이 아니에요. HotChocoCre에서 내보낸 파일이 맞는지 확인해주세요.');
+      inputEl.value = '';
+      return;
+    }
+    const ok = confirm(`이 백업 파일로 복원하면 지금 있는 데이터(개체 ${state.individuals.length}마리 · 메이팅 ${state.matings.length}건 · 알 ${state.clutches.length}건 · 해칭개체 ${state.hatchlings.length}마리)는 전부 사라지고 백업 시점(개체 ${parsed.individuals.length}마리 등)으로 덮어써져요.\n계속할까요?`);
+    if(!ok){ inputEl.value=''; return; }
+    state = parsed;
+    inputEl.value = '';
+    await persistAndRender();
+    alert('복원이 완료됐어요!');
+  }catch(e){
+    alert('가져오기 실패: 파일이 손상되었거나 형식이 올바르지 않아요.');
+    inputEl.value = '';
+  }
 }
 
 function openSyncSetupForm(){
