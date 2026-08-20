@@ -1864,11 +1864,14 @@ function setMatingFilter(v){ listFilters.mating = v; updateMatingListBody(); }
 let showEndedMatings = false;
 function toggleShowEndedMatings(){ showEndedMatings = !showEndedMatings; updateMatingListBody(); updateMatingListControls(); }
 
+let matingSort = 'recent';
+function setMatingSort(v){ matingSort = v; updateMatingListBody(); }
+
 function getFilteredMatings(){
   const q = listFilters.mating.trim().toLowerCase();
   let items = state.matings.slice().sort((a,b)=>{
     const av = latestMatingDate(a)||''; const bv = latestMatingDate(b)||'';
-    return bv.localeCompare(av);
+    return matingSort==='old' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
   if(!showEndedMatings){
     items = items.filter(m=>normalizeMatingStatus(m.status)!=='산란 종료');
@@ -1902,6 +1905,12 @@ function renderMatingList(){
   const endedCount = state.matings.filter(m=>normalizeMatingStatus(m.status)==='산란 종료').length;
   return `<div class="section-head"><h2>메이팅 관리</h2><span class="count">${state.matings.length}쌍</span></div>
     <div class="searchbar"><input placeholder="암컷·수컷 이름으로 검색" value="${esc(listFilters.mating)}" oninput="setMatingFilter(this.value)"></div>
+    <div class="searchbar">
+      <select onchange="setMatingSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="recent" ${matingSort==='recent'?'selected':''}>최근 메이팅일 최신순</option>
+        <option value="old" ${matingSort==='old'?'selected':''}>최근 메이팅일 오래된순</option>
+      </select>
+    </div>
     ${endedCount>0?`<div class="searchbar"><button type="button" id="mating-ended-toggle" class="chip-toggle${showEndedMatings?' chip-selected':''}" onclick="toggleShowEndedMatings()">${showEndedMatings?'종료 같이 보는 중 ✓':'종료 같이 보기'}</button></div>`:''}
     <div id="mating-list-body">${renderMatingListBody(items)}</div>`;
 }
