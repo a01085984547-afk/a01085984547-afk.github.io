@@ -1248,7 +1248,7 @@ function renderHatchlingListBody(items){
       ${h.promotedToId?`<span class="chip">개체 등록됨</span>`:''}
       ${h.price?`<span class="chip muted">${fmtMoney(h.price)}</span>`:''}
     </div>
-    <div class="card-sub">부모 ${esc(h.damName)} × ${esc(h.sireName)} · 해칭일 ${esc(h.hatchDate)||'-'}</div>
+    <div class="card-sub">부모 ${esc(h.damName)} × ${esc(h.sireName)} · 해칭일 ${esc(h.hatchDate)||'-'}${(()=>{const c=state.clutches.find(c=>c.id===h.clutchId);return c&&c.clutchNum?' · '+esc(c.clutchNum)+'차':'';})()}</div>
   </div>`).join('');
 }
 
