@@ -1205,11 +1205,12 @@ function setIndividualViewMode(v){
 
 function renderIndividualCompactRow(i){
   const morphLabel = formatMorphFull(i.morph, i.morphHet).main;
+  const age = i.hatchDate ? ageLabel(i.hatchDate) : '';
   return `<div class="compact-row" onclick="openIndividualForm('${i.id}')">
     ${avatarHtml(i, 'individual', 30)}
     <div class="compact-info">
       <div class="compact-name">${esc(i.name)||'(이름없음)'}</div>
-      <div class="compact-meta">${morphLabel?esc(morphLabel)+' · ':''}${esc(i.gender)||'-'}</div>
+      <div class="compact-meta">${morphLabel?esc(morphLabel)+(age?` (${age})`:'')+' · ':''}${esc(i.gender)||'-'}</div>
       <div class="compact-meta">${esc(i.status)||'-'}${i.salePrice?(' · '+fmtMoney(i.salePrice)):''}</div>
     </div>
   </div>`;
@@ -1330,10 +1331,11 @@ function setHatchlingViewMode(v){
 }
 
 function renderHatchlingCompactRow(h){
+  const age = h.hatchDate ? ageLabel(h.hatchDate) : '';
   return `<div class="compact-row" onclick="openHatchlingForm('${h.id}')">
     ${avatarHtml(h, 'hatchling', 30)}
     <div class="compact-info">
-      <div class="compact-name">${esc(h.morph)||'모프 미정'}</div>
+      <div class="compact-name">${esc(h.morph)||'모프 미정'}${age?` (${age})`:''}</div>
       <div class="compact-meta">${h.morphHet?esc(formatHetDisplay(h.morphHet))+' · ':''}${esc(h.gender)||'-'}</div>
       <div class="compact-meta">${esc(h.status)||'-'}${h.price?(' · '+fmtMoney(h.price)):''}</div>
     </div>
@@ -3015,15 +3017,27 @@ const SOLD_SORTERS = {
 };
 function setSoldSort(v){ soldSort = v; renderMainOnly(); }
 
+let soldViewMode = 'card';
+function setSoldViewMode(v){
+  soldViewMode = v;
+  renderMainOnly();
+  const cardBtn = document.getElementById('sold-view-card-btn');
+  const compactBtn = document.getElementById('sold-view-compact-btn');
+  if(cardBtn) cardBtn.classList.toggle('chip-selected', v==='card');
+  if(compactBtn) compactBtn.classList.toggle('chip-selected', v==='compact');
+}
+
 function getSoldRecords(){
   const list = [];
   state.individuals.forEach(i=>{
     if(i.status==='분양 완료'){
       list.push({
         kind:'individual', id:i.id, label:i.name||'(이름없음)',
+        morph:i.morph, morphHet:i.morphHet,
         parents:`${i.sireName||'-'} × ${i.damName||'-'}`,
         hatchDate:i.hatchDate, gender:i.gender,
-        salePlatform:i.salePlatform, saleDate:i.saleDate, salePrice:i.salePrice
+        salePlatform:i.salePlatform, saleDate:i.saleDate, salePrice:i.salePrice,
+        photos:i.photos||[], primaryPhotoId:i.primaryPhotoId||null
       });
     }
   });
@@ -3031,14 +3045,36 @@ function getSoldRecords(){
     if(h.status==='분양 완료'){
       list.push({
         kind:'hatchling', id:h.id, label:h.morph||'모프 미정',
+        morph:h.morph, morphHet:h.morphHet,
         parents:`${h.sireName||'-'} × ${h.damName||'-'}`,
         hatchDate:h.hatchDate, gender:h.gender,
-        salePlatform:h.salePlatform, saleDate:h.saleDate, salePrice:h.price
+        salePlatform:h.salePlatform, saleDate:h.saleDate, salePrice:h.price,
+        photos:h.photos||[], primaryPhotoId:h.primaryPhotoId||null
       });
     }
   });
   list.sort(SOLD_SORTERS[soldSort] || SOLD_SORTERS.saledate_desc);
   return list;
+}
+
+function renderSoldCompactRow(r){
+  const openFn = r.kind==='individual' ? `openIndividualForm('${r.id}')` : `openHatchlingForm('${r.id}')`;
+  const age = r.hatchDate ? ageLabel(r.hatchDate) : '';
+  let line2;
+  if(r.kind==='individual'){
+    const morphLabel = formatMorphFull(r.morph, r.morphHet).main;
+    line2 = `${morphLabel?esc(morphLabel)+' · ':''}${esc(r.gender)||'-'}`;
+  } else {
+    line2 = `${r.morphHet?esc(formatHetDisplay(r.morphHet))+' · ':''}${esc(r.gender)||'-'}`;
+  }
+  return `<div class="compact-row" onclick="${openFn}">
+    ${avatarHtml(r, r.kind, 30)}
+    <div class="compact-info">
+      <div class="compact-name">${esc(r.label)}${age?` (${age})`:''}</div>
+      <div class="compact-meta">${line2}</div>
+      <div class="compact-meta">${r.salePrice?fmtMoney(r.salePrice):'가격 미입력'}${r.saleDate?(' · '+esc(r.saleDate)):''}</div>
+    </div>
+  </div>`;
 }
 
 function renderSoldTab(){
@@ -3064,16 +3100,29 @@ function renderSoldTab(){
   }
 
   html += `<div class="searchbar">
+    <button type="button" id="sold-view-card-btn" class="chip-toggle ${soldViewMode==='card'?'chip-selected':''}" style="flex:1;" onclick="setSoldViewMode('card')">카드형</button>
+    <button type="button" id="sold-view-compact-btn" class="chip-toggle ${soldViewMode==='compact'?'chip-selected':''}" style="flex:1;" onclick="setSoldViewMode('compact')">간단히 보기</button>
+  </div>`;
+
+  html += `<div class="searchbar">
     <select onchange="setSoldSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
       ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===soldSort?'selected':''}>${o.l}</option>`).join('')}
     </select>
   </div>`;
 
+  if(soldViewMode==='compact'){
+    html += `<div class="compact-list">${records.map(renderSoldCompactRow).join('')}</div>`;
+    return html;
+  }
+
   records.forEach(r=>{
     const openFn = r.kind==='individual' ? `openIndividualForm('${r.id}')` : `openHatchlingForm('${r.id}')`;
     html += `<div class="card" onclick="${openFn}">
       <div class="card-top">
-        <div><div class="card-title">${esc(r.label)}</div><div class="card-id">${esc(r.id)}</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start;">
+          ${avatarHtml(r, r.kind)}
+          <div><div class="card-title">${esc(r.label)}</div><div class="card-id">${esc(r.id)}</div></div>
+        </div>
         <div class="chip alt">${r.salePrice?fmtMoney(r.salePrice):'가격 미입력'}</div>
       </div>
       <div class="card-meta">
