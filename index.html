@@ -2042,10 +2042,11 @@ function openMatingForm(id){
         <label class="field"><span>산란 주기(일)</span><input type="number" name="cycleDays" value="${data.cycleDays||DEFAULT_CYCLE_DAYS}" min="1"></label>
         <label class="field"><span>기본 인큐베이션 온도(°C)</span><input type="number" name="incubationTemp" step="0.1" value="${data.incubationTemp||DEFAULT_INCUBATION_TEMP}"></label>
         <label class="field"><span>산란 종료일(기록용, 선택)</span><input type="date" name="seasonEndDate" value="${esc(data.seasonEndDate||'')}"></label>
+        ${isNew?`<label class="field"><span>메이팅 날짜</span><input type="date" name="firstMatingDate" value="${todayISO()}" required></label>`:''}
       </div>
       <div class="readonly-note">상태를 '산란 종료'로 바꾸면 다음 산란예정일 계산이 멈춰요. 카드에서 상태 칩을 눌러도 바로 전환돼요.</div>
 
-      ${!isNew?`<button type="button" class="btn btn-ghost btn-block" style="margin-top:6px;" onclick="closeModal(); openMatingLogForm('${id}');">+ 메이팅 기록(재메이팅) 추가</button>`:''}
+      ${!isNew?`<button type="button" class="btn btn-ghost btn-block" style="margin-top:6px;" onclick="openMatingLogForm('${id}');">+ 메이팅 기록(재메이팅) 추가</button>`:''}
 
       <div class="modal-actions">
         ${!isNew?`<button type="button" class="btn btn-danger" onclick="deleteMating('${id}')">삭제</button>`:''}
@@ -2071,7 +2072,8 @@ async function saveMating(id){
     Object.assign(item, obj);
   } else {
     obj.id = nextEntityId('HCC-P-', state.matings, 4);
-    obj.matingLog = [todayISO()];
+    obj.matingLog = [obj.firstMatingDate || todayISO()];
+    delete obj.firstMatingDate;
     state.matings.push(obj);
   }
   closeModal();
@@ -2333,13 +2335,13 @@ function openEggDetail(clutchId, eggNum){
         <div class="dcell"><div class="lbl">모프</div><div class="val">${esc(hatchling.morph)||'-'}</div></div>
       </div>
       <div class="modal-actions">
-        <button class="btn btn-ghost btn-block" onclick="closeModal(); openHatchlingForm('${hatchling.id}');">해칭개체 정보 보기/수정 →</button>
+        <button class="btn btn-ghost btn-block" onclick="openHatchlingForm('${hatchling.id}');">해칭개체 정보 보기/수정 →</button>
       </div>`;
   } else if(!fertile){
     resultBlock = `
       <div class="readonly-note" style="margin-top:12px;">${status==='무정'?'무정란이라 부화하지 않아요.':'유/무정 상태가 아직 미상이에요. 확인되면 클러치 정보에서 상태를 바꿔주세요.'}</div>
       <div class="modal-actions">
-        <button class="btn btn-ghost btn-block" onclick="closeModal(); openClutchForm('${c.id}');">클러치 정보 수정 →</button>
+        <button class="btn btn-ghost btn-block" onclick="openClutchForm('${c.id}');">클러치 정보 수정 →</button>
       </div>`;
   } else {
     resultBlock = `
@@ -2351,8 +2353,8 @@ function openEggDetail(clutchId, eggNum){
         <div class="dcell"><div class="lbl">최장</div><div class="val">${pred.maxDate?fmtKo(pred.maxDate):'-'}</div></div>
       </div>
       <div class="modal-actions" style="flex-direction:column;">
-        <button class="btn btn-primary btn-block" onclick="closeModal(); openHatchlingForm(null, {clutchId:'${c.id}', eggLabel:'${label}'});">🐣 이 알 해칭 기록하기 →</button>
-        <button class="btn btn-ghost btn-block" onclick="closeModal(); openClutchForm('${c.id}');">클러치 정보 수정 →</button>
+        <button class="btn btn-primary btn-block" onclick="openHatchlingForm(null, {clutchId:'${c.id}', eggLabel:'${label}'});">🐣 이 알 해칭 기록하기 →</button>
+        <button class="btn btn-ghost btn-block" onclick="openClutchForm('${c.id}');">클러치 정보 수정 →</button>
       </div>`;
   }
 
@@ -2675,7 +2677,7 @@ function promoteHatchling(hatchId){
   const genderUnknown = h.gender==='미구분';
   const warning = genderUnknown ? `
     <div class="bloodline-banner warning">⚠️ 아직 성별이 '미구분'이에요. 이대로 등록하면 개체 ID가 <b>HCC-U-</b>로 부여되고, 나중에 성별을 알아내도 ID는 자동으로 안 바뀌어요.</div>
-    <button type="button" class="btn btn-ghost btn-block" style="margin-bottom:10px;" onclick="closeModal(); openHatchlingForm('${hatchId}');">먼저 성별부터 정하러 가기 →</button>
+    <button type="button" class="btn btn-ghost btn-block" style="margin-bottom:10px;" onclick="openHatchlingForm('${hatchId}');">먼저 성별부터 정하러 가기 →</button>
   ` : '';
   const body = `
     ${warning}
