@@ -1209,8 +1209,8 @@ function renderIndividualCompactRow(i){
   return `<div class="compact-row" onclick="openIndividualForm('${i.id}')">
     ${avatarHtml(i, 'individual', 30)}
     <div class="compact-info">
-      <div class="compact-name">${esc(i.name)||'(이름없음)'}</div>
-      <div class="compact-meta">${morphLabel?esc(morphLabel)+(age?` (${age})`:'')+' · ':''}${esc(i.gender)||'-'}</div>
+      <div class="compact-name">${esc(i.name)||'(이름없음)'}${age?` <span class="compact-sub">(${age})</span>`:''}</div>
+      <div class="compact-meta">${morphLabel?esc(morphLabel)+' · ':''}${esc(i.gender)||'-'}</div>
       <div class="compact-meta">${esc(i.status)||'-'}${i.salePrice?(' · '+fmtMoney(i.salePrice)):''}</div>
     </div>
   </div>`;
@@ -1438,6 +1438,7 @@ function openModal(title, bodyHtml){
      내용만 바뀌는 경우는 새로 쌓지 않음 - 예: 개체수정 안에서 가계도 보기). */
   if(!wasOpen){
     pushBackGuard();
+    modalGuardActive = true;
   }
 }
 function closeModal(){
@@ -1447,10 +1448,14 @@ function closeModalUiOnly(){
   document.getElementById('modal-root').innerHTML = '';
 }
 
-/* ---------------- 뒤로가기 처리: 모달 중이면 모달만 닫고, 메인 화면이면 "두 번 눌러 종료" ---------------- */
+/* ---------------- 뒤로가기 처리: 모달 중이면 모달만 닫고, 메인 화면이면 "두 번 눌러 종료" ----------------
+   modalGuardActive로 "지금 쌓여있는 기록 한 칸이 모달용인지"를 명시적으로 추적한다.
+   (모달 안에서 내용만 바뀌는 경우는 이 플래그를 새로 세우지 않으므로, 닫을 때
+   기록을 다시 안 쌓아서 매번 정확히 원래 깊이로 돌아온다 - 이전 버전의 "쌓이는" 버그 수정) */
 function pushBackGuard(){
   try{ history.pushState({guard:Date.now()}, ''); }catch(e){}
 }
+let modalGuardActive = false;
 let exitArmed = false;
 let exitArmTimer = null;
 function showExitToast(){
@@ -1467,11 +1472,10 @@ function showExitToast(){
   }, 1600);
 }
 window.addEventListener('popstate', function(){
-  const modalWasOpen = document.getElementById('modal-root').innerHTML.trim().length > 0;
-  if(modalWasOpen){
+  if(modalGuardActive){
+    modalGuardActive = false;
     closeModalUiOnly();
-    pushBackGuard();
-    return;
+    return; // 새로 쌓지 않음 - 원래 깊이로 정확히 복귀
   }
   if(!exitArmed){
     exitArmed = true;
