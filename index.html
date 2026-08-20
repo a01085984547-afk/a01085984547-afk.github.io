@@ -742,6 +742,26 @@ function avgActualIncubationDays(){
   return vals.reduce((a,b)=>a+b,0)/vals.length;
 }
 
+/* 실제 해칭 기록을 0.5도 단위로 묶어서, 온도별 실측 평균 부화일수를 계산 (22도부터) */
+function roundToHalf(t){ return Math.round(parseFloat(t)*2)/2; }
+function getTempHatchBreakdown(){
+  const buckets = {};
+  state.hatchlings.forEach(h=>{
+    const days = parseFloat(h.incubationDays);
+    if(isNaN(days)) return;
+    const c = state.clutches.find(x=>x.id===h.clutchId);
+    const rawTemp = c ? (c.incubationTemp||DEFAULT_INCUBATION_TEMP) : DEFAULT_INCUBATION_TEMP;
+    const temp = roundToHalf(rawTemp);
+    if(!buckets[temp]) buckets[temp] = [];
+    buckets[temp].push(days);
+  });
+  return Object.keys(buckets).map(t=>({
+    temp: parseFloat(t),
+    avg: buckets[t].reduce((a,b)=>a+b,0)/buckets[t].length,
+    count: buckets[t].length
+  })).sort((a,b)=>a.temp-b.temp);
+}
+
 /* ---------------- 메이팅 정렬(산란·알 탭) ---------------- */
 let eggGroupSort = 'recent';
 let individualSort = 'age_desc';
@@ -1886,6 +1906,8 @@ async function deleteClutch(id){
 
 /* ---------------- 산란·알 탭 (페어별 아코디언, 경과일 카운터) ---------------- */
 let expandedEggGroups = new Set();
+let showTempBreakdown = false;
+function toggleTempBreakdown(){ showTempBreakdown = !showTempBreakdown; renderMainOnly(); }
 function toggleEggGroup(matingId){
   if(expandedEggGroups.has(matingId)) expandedEggGroups.delete(matingId);
   else expandedEggGroups.add(matingId);
@@ -1908,14 +1930,24 @@ function isEggGroupFullyDone(clutches){
 }
 
 function renderEggTab(){
-  const avgTemp = avgIncubationTemp();
-  const avgDays = avgActualIncubationDays();
+  const breakdown = getTempHatchBreakdown();
 
   let html = `<div class="section-head"><h2>산란·알</h2></div>
   <div class="section-sub">페어를 누르면 그 페어가 낳은 알 전체가 보여요. 부화한 알은 초록, 부화 대기 중인 알은 경과일이 카운트되고, 무정란은 회색으로 표시돼요.</div>
-  <div class="stat-grid">
-    <div class="stat-card"><div class="num">${avgTemp!==null?avgTemp.toFixed(1)+'°C':'-'}</div><div class="lbl">우리집 평균 인큐 온도</div></div>
-    <div class="stat-card"><div class="num">${avgDays!==null?Math.round(avgDays)+'일':'-'}</div><div class="lbl">우리집 알 평균 부화일수</div></div>
+  <div class="chipgroup-wrap">
+    <button type="button" class="chipgroup-toggle" onclick="toggleTempBreakdown()">
+      <span>우리집 온도별 실제 부화 평균${breakdown.length?(' · '+breakdown.length+'개 온도'):''}</span>
+      <span class="chevron" id="tempBreakdownChevron">${showTempBreakdown?'▴':'▾'}</span>
+    </button>
+    <div class="chipgroup-panel" id="tempBreakdownPanel" style="display:${showTempBreakdown?'block':'none'};">
+      ${breakdown.length===0
+        ? `<div class="readonly-note">아직 실제 해칭 기록(인큐베이션 일수)이 없어요. 알 해칭 기록하면 여기 쌓여요.</div>`
+        : breakdown.map(b=>`<div class="card-datarow" style="border-top:1px dashed var(--border);padding:9px 0;">
+            <div class="dcell"><div class="lbl">${b.temp}°C</div><div class="val">평균 ${Math.round(b.avg)}일</div></div>
+            <div class="dcell" style="text-align:right;"><div class="lbl">기록</div><div class="val">${b.count}마리</div></div>
+          </div>`).join('')
+      }
+    </div>
   </div>`;
 
   const matingIds = [...new Set(state.clutches.map(c=>c.matingId).filter(Boolean))];
