@@ -797,8 +797,8 @@ function getTempHatchBreakdown(){
 let eggGroupSort = 'recent';
 let individualSort = 'age_desc';
 const INDIVIDUAL_SORTERS = {
-  age_desc: (a,b)=>(b.hatchDate||'').localeCompare(a.hatchDate||''),
-  age_asc:  (a,b)=>(a.hatchDate||'').localeCompare(b.hatchDate||''),
+  age_desc: (a,b)=>(a.hatchDate||'').localeCompare(b.hatchDate||''), // 나이 많은순 = 해칭일이 이른(작은) 개체가 먼저
+  age_asc:  (a,b)=>(b.hatchDate||'').localeCompare(a.hatchDate||''), // 나이 어린순 = 해칭일이 늦은(최근) 개체가 먼저
   name: (a,b)=>(a.name||'').localeCompare(b.name||'','ko'),
   id: (a,b)=>(a.id||'').localeCompare(b.id||''),
   gender: (a,b)=>{
@@ -1173,6 +1173,7 @@ function renderIndividualListBody(items){
       ${i.morph?`<span class="chip muted">${esc(formatMorphFull(i.morph,i.morphHet).main)}</span>`:''}
       ${(i.morphPatterns||[]).map(p=>`<span class="chip muted">${esc(p)}</span>`).join('')}
       ${(i.morphColors||[]).map(c=>`<span class="chip muted">${esc(c)}</span>`).join('')}
+      ${i.dotStatus==='있음'?`<span class="chip alt">점 있음</span>`:''}
       ${i.status?`<span class="chip ${i.status==='보유'?'':'muted'}">${esc(i.status)}</span>`:''}
       ${i.breeding==='예'?`<span class="chip">브리딩</span>`:''}
       ${i.main==='예'?`<span class="chip alt">메인</span>`:''}
@@ -1579,7 +1580,7 @@ function updateParentBloodlineCheck(){
 function openIndividualForm(id){
   const item = id ? state.individuals.find(i=>i.id===id) : null;
   const isNew = !item;
-  const data = item || {gender:'미구분', originType:'외부 영입', keep:'예', breeding:'아니오', main:'아니오', status:'보유'};
+  const data = item || {gender:'미구분', originType:'외부 영입', dotStatus:'미상', keep:'예', breeding:'아니오', main:'아니오', status:'보유'};
 
   const body = `
     <form id="individual-form" onsubmit="event.preventDefault(); saveIndividual('${id||''}');">
@@ -1591,6 +1592,7 @@ function openIndividualForm(id){
         <label class="field"><span>해칭일</span><input type="date" name="hatchDate" value="${esc(data.hatchDate||'')}"></label>
         <label class="field"><span>모프(기본)</span>${buildMorphSelectHtml('own', data.morph||'')}</label>
         <label class="field"><span>헷(Het) 여부</span>${buildHetSelectHtml('own', data.morphHet||'')}</label>
+        <label class="field"><span>점 여부</span><select name="dotStatus">${selOpts(['있음','없음','미상'],data.dotStatus)}</select></label>
         <label class="field"><span>출신 구분</span><select name="originType">${selOpts(['외부 영입','자가 해칭'],data.originType)}</select></label>
         <label class="field full"><span>출신 업체</span><input name="originCompany" value="${esc(data.originCompany||'')}"></label>
       </div>
