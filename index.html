@@ -156,6 +156,7 @@ main{padding:16px 16px 100px;}
 .ped-name{font-weight:700;font-size:13px;color:var(--ink);}
 .ped-side{font-size:10.5px;font-weight:700;color:var(--amber);background:var(--amber-soft);padding:1px 6px;border-radius:999px;margin-right:2px;}
 .ped-morph{font-size:11px;color:var(--ink-soft);margin-top:1px;}
+.ped-code{font-size:9.5px;color:var(--ink-faint);margin-top:1px;font-family:monospace;}
 .ped-tag{font-size:9.5px;font-weight:700;background:var(--caution-soft);color:var(--caution);padding:1px 6px;border-radius:999px;margin-left:2px;}
 .ped-children{margin-left:20px;padding-left:14px;border-left:2px solid var(--border);}
 .badge-link{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:var(--moss);background:var(--moss-soft);padding:5px 10px;border-radius:999px;}
@@ -2181,6 +2182,7 @@ function renderPedigreeVisualNode(ent, sideLabel, gen, maxGen){
     <div class="ped-info">
       <div class="ped-name">${sideLabel?`<span class="ped-side">${esc(sideLabel)}</span> `:''}${esc(ent.name||ent.morph||ent.id)}</div>
       <div class="ped-morph">${esc(morphLabel)||'모프 미상'}${ent.gender?' · '+esc(ent.gender):''}</div>
+      <div class="ped-code">${esc(ent.id)}</div>
     </div>
   </div>`;
   if(gen>=maxGen) return box;
@@ -2598,10 +2600,14 @@ function renderSettingsTab(){
 
   html += `<div class="section-head" style="margin-top:22px;"><h2 style="font-size:15px;">데이터 백업</h2></div>
   <div class="card"><div class="card-sub">개체 ${state.individuals.length}마리 · 메이팅 ${state.matings.length}건 · 알 ${state.clutches.length}건 · 해칭개체 ${state.hatchlings.length}마리 저장되어 있어요.</div></div>
-  <button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="exportBackup()">📥 데이터 내보내기 (백업)</button>
+  <button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="exportBackup()">📥 복원용 백업 내보내기 (JSON)</button>
   <button class="btn btn-ghost btn-block" style="margin-top:8px;" onclick="triggerImportBackup()">📤 백업 파일 가져오기 (복원)</button>
   <input type="file" id="backup-import-input" accept="application/json" style="display:none;" onchange="handleImportBackup(this)">
-  <div class="disclaimer" style="margin-top:12px;">이 앱은 폰 안에만 저장되기 때문에, 폰을 바꾸거나 데이터가 지워지면 복구할 방법이 없어요. 가끔 "내보내기"로 파일을 받아서 구글 드라이브나 이메일에 저장해두시면, 나중에 "가져오기"로 사진까지 포함해서 그대로 복원할 수 있어요.</div>`;
+  <button class="btn btn-ghost btn-block" style="margin-top:8px;" onclick="exportExcelBackup()">📊 엑셀로 보기 좋게 내보내기 (PC용)</button>
+  <div class="disclaimer" style="margin-top:12px;">
+    <b style="display:block;margin-bottom:4px;color:var(--ink);">JSON 파일</b> — 이 앱으로 다시 불러오면(가져오기) 사진까지 포함해서 완벽하게 복원돼요. 폰이 바뀌거나 데이터가 지워졌을 때를 대비한 진짜 백업용이에요.<br><br>
+    <b style="display:block;margin-bottom:4px;color:var(--ink);">엑셀 파일</b> — 컴퓨터에서 표로 열어서 훑어보거나 정리하기 편한 용도예요(사진은 안 들어가고, 이 파일로 앱에 다시 불러오지는 못해요). 시트가 개체관리·메이팅관리·산란알관리·해칭개체로 나뉘어 있어요.
+  </div>`;
 
   html += `<div class="section-head" style="margin-top:22px;"><h2 style="font-size:15px;">앱 정보</h2></div>
   <div class="card"><div class="card-sub" style="line-height:1.8;">
@@ -2655,6 +2661,63 @@ async function handleImportBackup(inputEl){
   }catch(e){
     alert('가져오기 실패: 파일이 손상되었거나 형식이 올바르지 않아요.');
     inputEl.value = '';
+  }
+}
+
+async function exportExcelBackup(){
+  let ok = true;
+  try{
+    await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  }catch(e){ ok = false; }
+  if(!ok || !window.XLSX){
+    alert('엑셀 내보내기에 필요한 파일을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    return;
+  }
+  try{
+    const wb = XLSX.utils.book_new();
+
+    const indRows = state.individuals.map(i=>({
+      '개체ID': i.id, '이름': i.name||'', '성별': i.gender||'', '해칭일': i.hatchDate||'',
+      '모프': i.morph||'', '헷여부': i.morphHet||'', '패턴': (i.morphPatterns||[]).join(', '), '컬러': (i.morphColors||[]).join(', '),
+      '출신구분': i.originType||'', '출신업체': i.originCompany||'',
+      '부이름': i.sireName||'', '부모프': i.sireMorph||'', '부헷': i.sireHet||'',
+      '모이름': i.damName||'', '모모프': i.damMorph||'', '모헷': i.damHet||'',
+      '킵여부': i.keep||'', '브리딩여부': i.breeding||'', '메인여부': i.main||'', '현재상태': i.status||'',
+      '분양플랫폼': i.salePlatform||'', '분양일': i.saleDate||'', '분양가': i.salePrice||'',
+      '메모': i.memo||''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(indRows), '개체관리');
+
+    const matRows = state.matings.map(m=>({
+      '메이팅ID': m.id, '암컷이름': m.damName||'', '암컷ID': m.damId||'', '수컷이름': m.sireName||'', '수컷ID': m.sireId||'',
+      '최근메이팅일': latestMatingDate(m)||'', '상태': normalizeMatingStatus(m.status),
+      '산란주기(일)': m.cycleDays||'', '기본인큐온도': m.incubationTemp||'', '산란종료일': m.seasonEndDate||''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matRows), '메이팅관리');
+
+    const clRows = state.clutches.map(c=>({
+      '클러치ID': c.id, '메이팅ID': c.matingId||'', '암컷이름': c.damName||'', '수컷이름': c.sireName||'',
+      '차수': c.clutchNum||'', '산란일': c.layDate||'', '알1상태': c.egg1Status||'', '알2상태': c.egg2Status||'',
+      '인큐온도': c.incubationTemp||'', '실제해칭수': c.actualHatchCount||'', '부화실패수': c.failCount||'',
+      '특이사항': c.note||''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clRows), '산란알관리');
+
+    const hRows = state.hatchlings.map(h=>({
+      '해칭ID': h.id, '클러치ID': h.clutchId||'', '알번호': h.eggLabel||'', '해칭일': h.hatchDate||'',
+      '인큐베이션일수': h.incubationDays||'', '모이름': h.damName||'', '부이름': h.sireName||'',
+      '확정모프': h.morph||'', '헷': h.morphHet||'', '패턴': (h.morphPatterns||[]).join(', '), '컬러': (h.morphColors||[]).join(', '),
+      '성별': h.gender||'', '점여부': h.dotStatus||'', '킵': h.keep||'', '브리딩': h.breeding||'', '메인': h.main||'', '상태': h.status||'',
+      '분양플랫폼': h.salePlatform||'', '분양일': h.saleDate||'', '분양가': h.price||'',
+      '개체등록여부': h.promotedToId ? ('등록됨('+h.promotedToId+')') : '',
+      '메모': h.note||''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hRows), '해칭개체');
+
+    XLSX.writeFile(wb, `hotchoco_backup_${todayISO()}.xlsx`);
+  }catch(e){
+    console.error(e);
+    alert('엑셀 내보내기 실패: '+e.message);
   }
 }
 
