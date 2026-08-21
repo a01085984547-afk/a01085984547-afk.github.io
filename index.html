@@ -283,7 +283,10 @@ function addDays(dateStr, days){
   if(!dateStr || days===null || days===undefined || isNaN(days)) return null;
   const d = new Date(dateStr+'T00:00:00');
   d.setDate(d.getDate()+Math.round(days));
-  return d.toISOString().slice(0,10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
 }
 function daysBetween(a,b){
   return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000);
@@ -341,9 +344,18 @@ function interpolateField(temp, field){
 function predictHatchDays(temp){
   const t = parseFloat(temp);
   if(isNaN(t)) return {danger:false, min:null, max:null, avg:null};
+  const danger = t<MIN_SAFE_TEMP || t>MAX_SAFE_TEMP;
+  /* 그 온도에서 실제로 부화시킨 기록이 3건 이상 쌓여있으면, 참고표(고정값) 대신
+     우리집 실측 평균을 우선 써서 갈수록 더 정확해지게 한다. */
+  const rounded = roundToHalf(t);
+  const real = (getTempHatchBreakdown()||[]).find(b=>b.temp===rounded);
+  if(real && real.count>=3){
+    return { danger, min:real.min, max:real.max, avg:Math.round(real.avg), source:'actual' };
+  }
   return {
-    danger: t<MIN_SAFE_TEMP || t>MAX_SAFE_TEMP,
-    min: interpolateField(t,'min'), max: interpolateField(t,'max'), avg: interpolateField(t,'avg')
+    danger,
+    min: interpolateField(t,'min'), max: interpolateField(t,'max'), avg: interpolateField(t,'avg'),
+    source: 'chart'
   };
 }
 function predictHatchDates(layDate, temp){
@@ -834,6 +846,8 @@ function getTempHatchBreakdown(){
   return Object.keys(buckets).map(t=>({
     temp: parseFloat(t),
     avg: buckets[t].reduce((a,b)=>a+b,0)/buckets[t].length,
+    min: Math.min(...buckets[t]),
+    max: Math.max(...buckets[t]),
     count: buckets[t].length
   })).sort((a,b)=>a.temp-b.temp);
 }
