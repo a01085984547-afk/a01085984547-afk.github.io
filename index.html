@@ -1257,7 +1257,7 @@ function setIndividualViewMode(v){
 function renderIndividualCompactRow(i){
   const morphLabel = formatMorphFull(i.morph, i.morphHet).main;
   const age = i.hatchDate ? ageLabel(i.hatchDate) : '';
-  return `<div class="compact-row" onclick="openIndividualForm('${i.id}')">
+  return `<div class="compact-row" onclick="openIndividualDetail('${i.id}')">
     ${avatarHtml(i, 'individual', 30)}
     <div class="compact-info">
       <div class="compact-name">${esc(i.name)||'(이름없음)'}${age?` <span class="compact-sub">(${age})</span>`:''}</div>
@@ -1274,7 +1274,7 @@ function renderIndividualListBody(items){
   if(individualViewMode==='compact'){
     return `<div class="compact-list">${items.map(renderIndividualCompactRow).join('')}</div>`;
   }
-  return items.map(i=>`<div class="card" onclick="openIndividualForm('${i.id}')">
+  return items.map(i=>`<div class="card" onclick="openIndividualDetail('${i.id}')">
     <div class="card-top">
       <div style="display:flex;gap:10px;align-items:flex-start;">
         ${avatarHtml(i, 'individual')}
@@ -1383,7 +1383,7 @@ function setHatchlingViewMode(v){
 
 function renderHatchlingCompactRow(h){
   const age = h.hatchDate ? ageLabel(h.hatchDate) : '';
-  return `<div class="compact-row" onclick="openHatchlingForm('${h.id}')">
+  return `<div class="compact-row" onclick="openHatchlingDetail('${h.id}')">
     ${avatarHtml(h, 'hatchling', 30)}
     <div class="compact-info">
       <div class="compact-name">${esc(h.morph)||'모프 미정'}${age?` (${age})`:''}</div>
@@ -1400,7 +1400,7 @@ function renderHatchlingListBody(items){
   if(hatchlingViewMode==='compact'){
     return `<div class="compact-list">${items.map(renderHatchlingCompactRow).join('')}</div>`;
   }
-  return items.map(h=>`<div class="card" onclick="openHatchlingForm('${h.id}')">
+  return items.map(h=>`<div class="card" onclick="openHatchlingDetail('${h.id}')">
     <div class="card-top">
       <div style="display:flex;gap:10px;align-items:flex-start;">
         ${avatarHtml(h, 'hatchling')}
@@ -1549,6 +1549,12 @@ function updateOwnAgeNote(){
   const noteEl = document.getElementById('ownAgeNote');
   if(!dateEl || !noteEl) return;
   noteEl.textContent = dateEl.value ? `현재 나이: ${ageLabel(dateEl.value)}` : '';
+}
+function toggleFemaleOnlyFields(prefix){
+  const genderSel = document.getElementById(prefix+'GenderField');
+  const section = document.getElementById(prefix+'FemaleOnlySection');
+  if(!genderSel || !section) return;
+  section.style.display = genderSel.value==='암컷' ? 'block' : 'none';
 }
 
 /* ---------------- 개체 사진(최대 3장, 대표 사진 지정) ---------------- */
@@ -1827,6 +1833,118 @@ function updateParentBloodlineCheck(){
   box.innerHTML = '';
 }
 
+/* ---------------- 접이식 섹션(부모정보/사육상태 등 공용) ---------------- */
+function collapsibleSection(id, title, contentHtml, defaultOpen){
+  return `<div class="chipgroup-wrap" style="margin-bottom:12px;">
+    <button type="button" class="chipgroup-toggle" onclick="toggleDetailSection('${id}')">
+      <span>${esc(title)}</span>
+      <span class="chevron" id="${id}Chevron">${defaultOpen?'▴':'▾'}</span>
+    </button>
+    <div class="chipgroup-panel" id="${id}Panel" style="display:${defaultOpen?'block':'none'};">
+      ${contentHtml}
+    </div>
+  </div>`;
+}
+function toggleDetailSection(id){
+  const panel = document.getElementById(id+'Panel');
+  const chevron = document.getElementById(id+'Chevron');
+  if(!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if(chevron) chevron.textContent = isOpen ? '▾' : '▴';
+}
+
+/* ---------------- 개체 정보 보기(읽기 전용) + 수정하기 버튼 ---------------- */
+function latestMatingDateForIndividual(individualId){
+  let latest = null;
+  state.matings.forEach(m=>{
+    if(m.damId!==individualId && m.sireId!==individualId) return;
+    const d = latestMatingDate(m);
+    if(d && (!latest || d>latest)) latest = d;
+  });
+  return latest;
+}
+function latestInfertileLayDateForDam(individualId){
+  let latest = null;
+  state.clutches.forEach(c=>{
+    if(c.damId!==individualId) return;
+    const hasInfertile = c.egg1Status==='무정' || c.egg2Status==='무정';
+    if(hasInfertile && c.layDate && (!latest || c.layDate>latest)) latest = c.layDate;
+  });
+  return latest;
+}
+/* 메이팅을 거친 무정란 기록(클러치)과, 메이팅 없이 혼자 낳은 걸 수기로 적어둔 날짜 중 더 최근 것을 보여준다 */
+function combinedLastInfertileLayDate(ind){
+  const fromClutch = latestInfertileLayDateForDam(ind.id);
+  const manual = ind.lastSoloInfertileLayDate || null;
+  if(fromClutch && manual) return fromClutch > manual ? fromClutch : manual;
+  return fromClutch || manual || null;
+}
+function openIndividualDetail(id){
+  const ind = state.individuals.find(i=>i.id===id);
+  if(!ind) return;
+  const morphLabel = formatMorphFull(ind.morph, ind.morphHet).main;
+  const lastMating = latestMatingDateForIndividual(ind.id);
+  const lastInfertile = ind.gender==='암컷' ? combinedLastInfertileLayDate(ind) : null;
+  const hasParentInfo = !!(ind.sireName || ind.sireId || ind.damName || ind.damId);
+
+  let body = `
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;">
+      ${avatarHtml(ind, 'individual', 64)}
+      <div style="min-width:0;">
+        <div style="font-family:var(--font-display);font-weight:700;font-size:19px;color:var(--ink);">${esc(ind.name)||'(이름없음)'}</div>
+        <div class="card-id">${esc(ind.id)}${ind.hatchDate?' · '+esc(ageLabel(ind.hatchDate)):''}</div>
+      </div>
+    </div>
+    <div class="card-meta" style="margin-bottom:10px;">
+      <span class="chip ${ind.gender==='수컷'?'alt':(ind.gender==='암컷'?'':'muted')}">${esc(ind.gender)}</span>
+      ${morphLabel?`<span class="chip muted">${esc(morphLabel)}</span>`:''}
+      ${(ind.morphPatterns||[]).map(p=>`<span class="chip muted">${esc(p)}</span>`).join('')}
+      ${(ind.morphColors||[]).map(c=>`<span class="chip muted">${esc(c)}</span>`).join('')}
+      ${ind.dotStatus==='있음'?`<span class="chip alt">점 있음</span>`:''}
+      ${ind.status?`<span class="chip ${ind.status==='보유'?'':'muted'}">${esc(ind.status)}</span>`:''}
+    </div>
+    <div class="readonly-note">해칭일 ${esc(ind.hatchDate)||'미상'} · 출신 ${esc(ind.originType)||'-'}${ind.originCompany?' ('+esc(ind.originCompany)+')':''}</div>
+
+    <div class="form-divider">번식 관련 기록</div>
+    <div class="card-datarow" style="border-top:none;">
+      <div class="dcell"><div class="lbl">최근 메이팅일</div><div class="val">${lastMating?esc(lastMating):'기록 없음'}</div></div>
+      ${ind.gender==='암컷'?`<div class="dcell"><div class="lbl">최근 무정란 산란일</div><div class="val">${lastInfertile?esc(lastInfertile):'기록 없음'}</div></div>`:''}
+    </div>
+  `;
+
+  const parentContent = (ind.sireName||ind.damName) ? `
+    <div class="card-datarow" style="border-top:none;">
+      <div class="dcell"><div class="lbl">부</div><div class="val">${esc(ind.sireName)||'-'}</div></div>
+      <div class="dcell"><div class="lbl">모</div><div class="val">${esc(ind.damName)||'-'}</div></div>
+    </div>
+    ${(ind.sireMorph||ind.sireHet)?`<div class="readonly-note">부 모프: ${esc(ind.sireMorph)||'-'}${ind.sireHet?' '+esc(formatHetDisplay(ind.sireHet)):''}</div>`:''}
+    ${(ind.damMorph||ind.damHet)?`<div class="readonly-note">모 모프: ${esc(ind.damMorph)||'-'}${ind.damHet?' '+esc(formatHetDisplay(ind.damHet)):''}</div>`:''}
+  ` : `<div class="readonly-note">등록된 부모 정보가 없어요.</div>`;
+  body += collapsibleSection('viewParents', '부모 정보', parentContent, false);
+
+  const statusContent = `
+    <div class="card-datarow" style="border-top:none;">
+      <div class="dcell"><div class="lbl">킵 여부</div><div class="val">${esc(ind.keep)}</div></div>
+      <div class="dcell"><div class="lbl">브리딩</div><div class="val">${esc(ind.breeding)}</div></div>
+      <div class="dcell"><div class="lbl">메인</div><div class="val">${esc(ind.main)}</div></div>
+    </div>
+    ${ind.status==='분양 완료'?`<div class="readonly-note">분양: ${esc(ind.salePlatform)||'-'} · ${esc(ind.saleDate)||'-'} · ${ind.salePrice?fmtMoney(ind.salePrice):'-'}</div>`:(ind.salePrice?`<div class="readonly-note">분양가: ${fmtMoney(ind.salePrice)}</div>`:'')}
+  `;
+  body += collapsibleSection('viewStatus', '사육 상태', statusContent, false);
+
+  if(ind.memo){
+    body += `<div class="form-divider">메모</div><div class="readonly-note">${esc(ind.memo)}</div>`;
+  }
+
+  body += `<div class="modal-actions" style="margin-top:16px;">
+    <button type="button" class="btn btn-ghost" onclick="openPedigreeTreeModal('IND:${ind.id}')">🌳 가계도</button>
+    <button type="button" class="btn btn-primary" onclick="openIndividualForm('${ind.id}')">✏️ 수정하기</button>
+  </div>`;
+
+  openModal(ind.name||ind.id, body);
+}
+
 function openIndividualForm(id){
   const item = id ? state.individuals.find(i=>i.id===id) : null;
   const isNew = !item;
@@ -1838,13 +1956,17 @@ function openIndividualForm(id){
       <div id="photo-strip"></div>
       <div class="form-grid" style="margin-top:14px;">
         <label class="field full"><span>이름</span><input name="name" value="${esc(data.name||'')}" required></label>
-        <label class="field"><span>성별</span><select name="gender">${selOpts(['수컷','암컷','미구분'],data.gender)}</select></label>
+        <label class="field"><span>성별</span><select name="gender" id="ownGenderField" onchange="toggleFemaleOnlyFields('own')">${selOpts(['수컷','암컷','미구분'],data.gender)}</select></label>
         <label class="field"><span>해칭일</span><input type="date" name="hatchDate" id="ownHatchDateField" value="${esc(data.hatchDate||'')}" onchange="updateOwnAgeNote()"></label>
         <label class="field"><span>모프(기본)</span>${buildMorphSelectHtml('own', data.morph||'')}</label>
         <label class="field"><span>헷(Het) 여부</span>${buildHetSelectHtml('own', data.morphHet||'')}</label>
         <label class="field"><span>점 여부</span><select name="dotStatus">${selOpts(['있음','없음','미상'],data.dotStatus)}</select></label>
         <label class="field"><span>출신 구분</span><select name="originType">${selOpts(['외부 영입','자가 해칭'],data.originType)}</select></label>
         <label class="field full"><span>출신 업체</span><input name="originCompany" value="${esc(data.originCompany||'')}"></label>
+      </div>
+      <div id="ownFemaleOnlySection" style="display:${data.gender==='암컷'?'block':'none'};">
+        <label class="field full"><span>최근 무정란 산란일 (메이팅 없이 혼자 낳은 경우)</span><input type="date" name="lastSoloInfertileLayDate" value="${esc(data.lastSoloInfertileLayDate||'')}"></label>
+        <div class="readonly-note" style="margin-top:-8px;">메이팅 후 낳은 무정란은 알 탭에서 기록하면 자동으로 잡혀요. 이 칸은 메이팅 없이 혼자 배란·산란한 경우만 직접 적어두는 용도예요.</div>
       </div>
       <div class="readonly-note" id="ownAgeNote" style="margin-top:-8px;">${data.hatchDate?`현재 나이: ${ageLabel(data.hatchDate)}`:''}</div>
       <div class="field full">${buildCollapsibleChipGroup('ownPatterns', '패턴', PATTERN_TRAITS, data.morphPatterns||[])}</div>
@@ -1857,6 +1979,7 @@ function openIndividualForm(id){
       ` : ''}
 
       <div class="form-divider">부(父) 정보</div>
+      ${collapsibleSection('editSire', (data.sireName?esc(data.sireName)+' 정보 수정':'부 정보 입력하기'), `
       <label class="field full"><span>기존 개체에서 선택</span>
         <select id="sireLinkSelect" onchange="onParentLinkChange('sire')">${buildIndividualOptionsByGender('수컷', data.sireId)}</select>
       </label>
@@ -1871,8 +1994,10 @@ function openIndividualForm(id){
       </div>
       <div class="field full">${buildCollapsibleChipGroup('sirePatterns', '부 패턴', PATTERN_TRAITS, data.sirePatterns||[])}</div>
       <div class="field full">${buildCollapsibleChipGroup('sireColors', '부 컬러/트레잇', COLOR_TRAITS, data.sireColors||[])}</div>
+      `, !!(data.sireName||data.sireId))}
 
       <div class="form-divider">모(母) 정보</div>
+      ${collapsibleSection('editDam', (data.damName?esc(data.damName)+' 정보 수정':'모 정보 입력하기'), `
       <label class="field full"><span>기존 개체에서 선택</span>
         <select id="damLinkSelect" onchange="onParentLinkChange('dam')">${buildIndividualOptionsByGender('암컷', data.damId)}</select>
       </label>
@@ -1886,10 +2011,12 @@ function openIndividualForm(id){
       </div>
       <div class="field full">${buildCollapsibleChipGroup('damPatterns', '모 패턴', PATTERN_TRAITS, data.damPatterns||[])}</div>
       <div class="field full">${buildCollapsibleChipGroup('damColors', '모 컬러/트레잇', COLOR_TRAITS, data.damColors||[])}</div>
+      `, !!(data.damName||data.damId))}
 
       <div id="parent-bloodline-check"></div>
 
       <div class="form-divider">사육 상태</div>
+      ${collapsibleSection('editStatus', '킵·브리딩·상태·분양가 수정', `
       <div class="form-grid">
         <label class="field"><span>킵 여부</span><select name="keep">${selOpts(['예','아니오','보류'],data.keep)}</select></label>
         <label class="field"><span>브리딩 여부</span><select name="breeding">${selOpts(['예','아니오','보류'],data.breeding)}</select></label>
@@ -1904,6 +2031,7 @@ function openIndividualForm(id){
           <label class="field"><span>분양일</span><input type="date" name="saleDate" value="${esc(data.saleDate||'')}"></label>
         </div>
       </div>
+      `, true)}
       <label class="field full"><span>메모</span><textarea name="memo">${esc(data.memo||'')}</textarea></label>
 
       <div class="modal-actions">
@@ -2702,6 +2830,61 @@ function onHatchClutchChange(){
   }
 }
 
+/* ---------------- 해칭개체 정보 보기(읽기 전용) + 수정하기 버튼 ---------------- */
+function openHatchlingDetail(id){
+  const h = state.hatchlings.find(x=>x.id===id);
+  if(!h) return;
+  const morphLabel = formatMorphFull(h.morph, h.morphHet).main;
+  const c = state.clutches.find(x=>x.id===h.clutchId);
+
+  let body = `
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;">
+      ${avatarHtml(h, 'hatchling', 64)}
+      <div style="min-width:0;">
+        <div style="font-family:var(--font-display);font-weight:700;font-size:19px;color:var(--ink);">${esc(h.morph)||'모프 미정'}</div>
+        <div class="card-id">${esc(h.id)} (알 ${esc(h.eggLabel)||'-'})${h.hatchDate?' · '+esc(ageLabel(h.hatchDate)):''}</div>
+      </div>
+    </div>
+    <div class="card-meta" style="margin-bottom:10px;">
+      <span class="chip muted">${esc(h.gender)}</span>
+      ${h.morphHet?`<span class="chip muted">${esc(formatHetDisplay(h.morphHet))}</span>`:''}
+      ${(h.morphPatterns||[]).map(p=>`<span class="chip muted">${esc(p)}</span>`).join('')}
+      ${(h.morphColors||[]).map(cl=>`<span class="chip muted">${esc(cl)}</span>`).join('')}
+      ${h.dotStatus==='있음'?`<span class="chip alt">점 있음</span>`:''}
+      ${h.status?`<span class="chip ${h.status==='보유'?'':'muted'}">${esc(h.status)}</span>`:''}
+      ${h.promotedToId?`<span class="chip">개체 등록됨</span>`:''}
+    </div>
+    <div class="readonly-note">부모 ${esc(h.damName)} × ${esc(h.sireName)}${c?' · '+esc(c.clutchNum)+'차 클러치':''}</div>
+    <div class="form-divider">해칭 정보</div>
+    <div class="card-datarow" style="border-top:none;">
+      <div class="dcell"><div class="lbl">산란일</div><div class="val">${esc(h.layDate)||'-'}</div></div>
+      <div class="dcell"><div class="lbl">해칭일</div><div class="val">${esc(h.hatchDate)||'-'}</div></div>
+      <div class="dcell"><div class="lbl">인큐베이션</div><div class="val">${h.incubationDays?h.incubationDays+'일':'-'}</div></div>
+    </div>
+  `;
+
+  const statusContent = `
+    <div class="card-datarow" style="border-top:none;">
+      <div class="dcell"><div class="lbl">킵 여부</div><div class="val">${esc(h.keep)}</div></div>
+      <div class="dcell"><div class="lbl">브리딩</div><div class="val">${esc(h.breeding)}</div></div>
+      <div class="dcell"><div class="lbl">메인</div><div class="val">${esc(h.main)}</div></div>
+    </div>
+    ${h.status==='분양 완료'?`<div class="readonly-note">분양: ${esc(h.salePlatform)||'-'} · ${esc(h.saleDate)||'-'} · ${h.price?fmtMoney(h.price):'-'}</div>`:(h.price?`<div class="readonly-note">분양가: ${fmtMoney(h.price)}</div>`:'')}
+  `;
+  body += collapsibleSection('viewHatchStatus', '사육 상태', statusContent, false);
+
+  if(h.note){
+    body += `<div class="form-divider">메모</div><div class="readonly-note">${esc(h.note)}</div>`;
+  }
+
+  body += `<div class="modal-actions" style="margin-top:16px;">
+    <button type="button" class="btn btn-ghost" onclick="openPedigreeTreeModal('HAT:${h.id}')">🌳 가계도</button>
+    <button type="button" class="btn btn-primary" onclick="openHatchlingForm('${h.id}')">✏️ 수정하기</button>
+  </div>`;
+
+  openModal(morphLabel||h.morph||'해칭개체', body);
+}
+
 function openHatchlingForm(id, prefill){
   const item = id ? state.hatchlings.find(h=>h.id===id) : null;
   const isNew = !item;
@@ -2765,6 +2948,10 @@ function openHatchlingForm(id, prefill){
       <div class="form-grid">
         <label class="field"><span>성별</span><select name="gender">${selOpts(['미구분','수컷','암컷'],data.gender)}</select></label>
         <label class="field"><span>점 여부</span><select name="dotStatus">${selOpts(['없음','있음','미상'],data.dotStatus)}</select></label>
+      </div>
+      <div class="form-divider">사육 상태</div>
+      ${collapsibleSection('editHatchStatus', '킵·브리딩·상태·분양가 수정', `
+      <div class="form-grid">
         <label class="field"><span>분양가</span><input type="text" inputmode="numeric" name="price" value="${formatNumberWithCommas(data.price)}" oninput="onPriceInputFormat(this)" placeholder="0"></label>
         <label class="field"><span>킵 여부</span><select name="keep">${selOpts(['예','아니오','보류'],data.keep)}</select></label>
         <label class="field"><span>브리딩 여부</span><select name="breeding">${selOpts(['예','아니오','보류'],data.breeding)}</select></label>
@@ -2778,6 +2965,7 @@ function openHatchlingForm(id, prefill){
           <label class="field"><span>분양일</span><input type="date" name="saleDate" value="${esc(data.saleDate||'')}"></label>
         </div>
       </div>
+      `, true)}
       <label class="field full"><span>메모</span><textarea name="note">${esc(data.note||'')}</textarea></label>
       ${!isNew?`<button type="button" class="btn btn-ghost btn-block" onclick="openPedigreeTreeModal('HAT:${data.id}')">🌳 가계도 보기</button>`:''}
 
@@ -3267,7 +3455,7 @@ function getSoldRecords(){
 }
 
 function renderSoldCompactRow(r){
-  const openFn = r.kind==='individual' ? `openIndividualForm('${r.id}')` : `openHatchlingForm('${r.id}')`;
+  const openFn = r.kind==='individual' ? `openIndividualDetail('${r.id}')` : `openHatchlingDetail('${r.id}')`;
   const age = r.hatchDate ? ageLabel(r.hatchDate) : '';
   let line2;
   if(r.kind==='individual'){
@@ -3325,7 +3513,7 @@ function renderSoldTab(){
   }
 
   records.forEach(r=>{
-    const openFn = r.kind==='individual' ? `openIndividualForm('${r.id}')` : `openHatchlingForm('${r.id}')`;
+    const openFn = r.kind==='individual' ? `openIndividualDetail('${r.id}')` : `openHatchlingDetail('${r.id}')`;
     html += `<div class="card" onclick="${openFn}">
       <div class="card-top">
         <div style="display:flex;gap:10px;align-items:flex-start;">
