@@ -596,6 +596,50 @@ function migrateMainToMainSub(st){
   (st.hatchlings||[]).forEach(h=>{ if(h.main==='예'){ h.main='메인'; changed=true; } });
   return changed;
 }
+/* 브리딩/프루븐 자동연동 규칙이 생기기 전부터 있던 과거 메이팅·유정란 기록도
+   소급 적용한다(매번 실행해도 안전 - bumpBreedingLevel은 등급을 올리기만 함). */
+function migrateBackfillBreedingProven(st){
+  let changed = false;
+  (st.matings||[]).forEach(m=>{
+    const sire = (st.individuals||[]).find(i=>i.id===m.sireId);
+    const dam = (st.individuals||[]).find(i=>i.id===m.damId);
+    if((m.matingLog||[]).length>0){
+      if(bumpBreedingLevel(sire, 2)) changed = true;
+      if(bumpBreedingLevel(dam, 1)) changed = true;
+    }
+    if((m.cohabitLog||[]).length>0){
+      if(bumpBreedingLevel(dam, 1)) changed = true;
+    }
+  });
+  (st.clutches||[]).forEach(c=>{
+    if(c.egg1Status==='유정' || c.egg2Status==='유정'){
+      const dam = (st.individuals||[]).find(i=>i.id===c.damId);
+      if(bumpBreedingLevel(dam, 2)) changed = true;
+    }
+  });
+  return changed;
+}
+/* 브리딩 여부/프루븐 자동 연동이 생기기 전부터 있던 기존 메이팅·클러치 기록을 한 번 소급 적용한다.
+   (딱 한 번만 실행 - 이후엔 사용자가 손으로 낮춰도 다시 안 올라가게) */
+function migrateBreedingProvenFromHistory(st){
+  if(st._breedingHistoryMigrated) return false;
+  (st.matings||[]).forEach(m=>{
+    if(m.matingLog && m.matingLog.length>0){
+      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===m.sireId), 2);
+      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===m.damId), 1);
+    }
+    if(m.cohabitLog && m.cohabitLog.length>0){
+      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===m.damId), 1);
+    }
+  });
+  (st.clutches||[]).forEach(c=>{
+    if(c.egg1Status==='유정' || c.egg2Status==='유정'){
+      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===c.damId), 2);
+    }
+  });
+  st._breedingHistoryMigrated = true;
+  return true;
+}
 
 /* ---------------- storage ---------------- */
 /* 저장소: Claude 아티팩트 환경(window.storage)에서 열었을 때는 그걸 쓰고,
@@ -634,7 +678,8 @@ async function loadState(){
   const migratedIds = migrateIndividualIdsToGenderPrefix(state);
   const migratedSaleLabel = migrateSaleStatusLabel(state);
   const migratedMain = migrateMainToMainSub(state);
-  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain){ await saveState(); }
+  const migratedBreeding = migrateBackfillBreedingProven(state);
+  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding){ await saveState(); }
 }
 async function saveState(){
   await storageSet(STORAGE_KEY, JSON.stringify(state));
