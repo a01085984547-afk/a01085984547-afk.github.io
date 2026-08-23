@@ -313,6 +313,23 @@ function nextEntityId(prefix, list, pad){
 }
 function currentYY(){ return String(new Date().getFullYear()).slice(2); }
 
+/* ---------------- 브리딩/프루븐 여부 자동 연동 (한번 올라간 등급은 자동으로 안 내려감, 수동 변경은 항상 가능) ---------------- */
+const BREEDING_LEVEL_NAMES = ['아니오','보류','예'];
+function breedingLevelOf(status){
+  const idx = BREEDING_LEVEL_NAMES.indexOf(status);
+  return idx===-1 ? 0 : idx;
+}
+function bumpBreedingLevel(individual, suggestedLevel){
+  if(!individual) return false;
+  const current = breedingLevelOf(individual.breeding);
+  if(suggestedLevel > current){
+    individual.breeding = BREEDING_LEVEL_NAMES[suggestedLevel];
+    if(suggestedLevel>=2) individual.provenStatus = '예';
+    return true;
+  }
+  return false;
+}
+
 /* ---------------- 부화기간 온도표 + 보간 ---------------- */
 const INCUBATION_TABLE = [
   {temp:20.0, min:104, max:130, avg:117, source:'chart'},
@@ -573,6 +590,12 @@ function migrateSaleStatusLabel(st){
   (st.hatchlings||[]).forEach(h=>{ if(h.status==='분양 예정'){ h.status='분양 중'; changed=true; } });
   return changed;
 }
+function migrateMainToMainSub(st){
+  let changed = false;
+  (st.individuals||[]).forEach(i=>{ if(i.main==='예'){ i.main='메인'; changed=true; } });
+  (st.hatchlings||[]).forEach(h=>{ if(h.main==='예'){ h.main='메인'; changed=true; } });
+  return changed;
+}
 
 /* ---------------- storage ---------------- */
 /* 저장소: Claude 아티팩트 환경(window.storage)에서 열었을 때는 그걸 쓰고,
@@ -610,7 +633,8 @@ async function loadState(){
   const migratedMorphs = migrateLegacyMorphs(state);
   const migratedIds = migrateIndividualIdsToGenderPrefix(state);
   const migratedSaleLabel = migrateSaleStatusLabel(state);
-  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel){ await saveState(); }
+  const migratedMain = migrateMainToMainSub(state);
+  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain){ await saveState(); }
 }
 async function saveState(){
   await storageSet(STORAGE_KEY, JSON.stringify(state));
@@ -622,9 +646,25 @@ async function persistAndRender(){ await saveState(); render(); }
 function clutchesOfMating(matingId){
   return state.clutches.filter(c=>c.matingId===matingId).sort((a,b)=>(a.layDate||'').localeCompare(b.layDate||''));
 }
+function latestCohabitReferenceDate(mating){
+  const log = mating.cohabitLog || [];
+  let latest = null;
+  log.forEach(c=>{
+    const ref = c.endDate || c.startDate; // 종료됐으면 종료일, 진행 중이면 시작일을 기준으로
+    if(ref && (!latest || ref>latest)) latest = ref;
+  });
+  return latest;
+}
+function activeCohabitation(mating){
+  return (mating.cohabitLog||[]).find(c=>c.startDate && !c.endDate) || null;
+}
 function latestMatingDate(mating){
-  if(!mating.matingLog || mating.matingLog.length===0) return null;
-  return mating.matingLog.slice().sort().slice(-1)[0];
+  const dates = [];
+  if(mating.matingLog && mating.matingLog.length) dates.push(...mating.matingLog);
+  const cohabDate = latestCohabitReferenceDate(mating);
+  if(cohabDate) dates.push(cohabDate);
+  if(dates.length===0) return null;
+  return dates.slice().sort().slice(-1)[0];
 }
 function nextClutchNum(mating){
   const cs = clutchesOfMating(mating.id);
@@ -1295,7 +1335,9 @@ function renderIndividualListBody(items){
       ${(()=>{const w=latestWeightEntry(i);return w?`<span class="chip muted">${w.grams}g</span>`:'';})()}
       ${i.status?`<span class="chip ${i.status==='보유'?'':'muted'}">${esc(i.status)}</span>`:''}
       ${i.breeding==='예'?`<span class="chip">브리딩</span>`:''}
-      ${i.main==='예'?`<span class="chip alt">메인</span>`:''}
+      ${i.provenStatus==='예'?`<span class="chip">프루븐</span>`:''}
+      ${i.main==='메인'?`<span class="chip alt">메인</span>`:''}
+      ${i.main==='서브'?`<span class="chip muted">서브</span>`:''}
     </div>
     <div class="card-sub">해칭일 ${esc(i.hatchDate)||'미상'}${i.hatchDate?` (${ageLabel(i.hatchDate)})`:''} · 출신 ${esc(i.originType)||'-'} ${i.originCompany?('('+esc(i.originCompany)+')'):''}</div>
   </div>`).join('');
@@ -1976,6 +2018,7 @@ function openIndividualDetail(id){
       ${(ind.morphPatterns||[]).map(p=>`<span class="chip muted">${esc(p)}</span>`).join('')}
       ${(ind.morphColors||[]).map(c=>`<span class="chip muted">${esc(c)}</span>`).join('')}
       ${ind.dotStatus==='있음'?`<span class="chip alt">점 있음</span>`:''}
+      ${ind.provenStatus==='예'?`<span class="chip">프루븐</span>`:''}
       ${ind.status?`<span class="chip ${ind.status==='보유'?'':'muted'}">${esc(ind.status)}</span>`:''}
     </div>
     <div class="readonly-note">해칭일 ${esc(ind.hatchDate)||'미상'} · 출신 ${esc(ind.originType)||'-'}${ind.originCompany?' ('+esc(ind.originCompany)+')':''}</div>
@@ -2007,6 +2050,7 @@ function openIndividualDetail(id){
     <div class="card-datarow" style="border-top:none;">
       <div class="dcell"><div class="lbl">킵 여부</div><div class="val">${esc(ind.keep)}</div></div>
       <div class="dcell"><div class="lbl">브리딩</div><div class="val">${esc(ind.breeding)}</div></div>
+      <div class="dcell"><div class="lbl">프루븐</div><div class="val">${esc(ind.provenStatus||'아니오')}</div></div>
       <div class="dcell"><div class="lbl">메인</div><div class="val">${esc(ind.main)}</div></div>
     </div>
     ${ind.status==='분양 완료'?`<div class="readonly-note">분양: ${esc(ind.salePlatform)||'-'} · ${esc(ind.saleDate)||'-'} · ${ind.salePrice?fmtMoney(ind.salePrice):'-'}</div>`:(ind.salePrice?`<div class="readonly-note">분양가: ${fmtMoney(ind.salePrice)}</div>`:'')}
@@ -2103,7 +2147,8 @@ function openIndividualForm(id){
       <div class="form-grid">
         <label class="field"><span>킵 여부</span><select name="keep">${selOpts(['예','아니오','보류'],data.keep)}</select></label>
         <label class="field"><span>브리딩 여부</span><select name="breeding">${selOpts(['예','아니오','보류'],data.breeding)}</select></label>
-        <label class="field"><span>메인 여부</span><select name="main">${selOpts(['예','아니오','보류'],data.main)}</select></label>
+        <label class="field"><span>프루븐 여부</span><select name="provenStatus">${selOpts(['예','아니오'],data.provenStatus||'아니오')}</select></label>
+        <label class="field"><span>메인/서브 여부</span><select name="main">${selOpts(['메인','서브','아니오','보류'],data.main)}</select></label>
         <label class="field"><span>현재 상태</span><select name="status" id="ownStatusField" onchange="toggleSaleSection('own')">${selOpts(['보유','분양 중','분양 완료','사망','기타'],data.status)}</select></label>
         <label class="field"><span>분양가</span><input type="text" inputmode="numeric" name="salePrice" value="${formatNumberWithCommas(data.salePrice)}" oninput="onPriceInputFormat(this)" placeholder="0"></label>
       </div>
@@ -2257,6 +2302,80 @@ function renderMatingList(){
     <div id="mating-list-body">${renderMatingListBody(items)}</div>`;
 }
 
+/* ---------------- 합사 기록(같이 살게만 둔 기간, 메이팅과 별개) ---------------- */
+function openCohabitLogForm(matingId, entryId){
+  const m = state.matings.find(x=>x.id===matingId);
+  if(!m) return;
+  const entry = entryId ? (m.cohabitLog||[]).find(c=>c.id===entryId) : null;
+  const body = `
+    <form id="cohabit-log-form" onsubmit="event.preventDefault(); saveCohabitLogEntry('${matingId}','${entryId||''}');">
+      <p style="font-size:13px;color:var(--ink-soft);line-height:1.6;">짝짓기 시도가 확인된 건 아니고 그냥 같이 지내게 둔 기간이에요. 아직 진행 중이면 종료일은 비워두세요.</p>
+      <div class="form-grid">
+        <label class="field"><span>합사 시작일</span><input type="date" name="startDate" value="${entry?esc(entry.startDate||''):todayISO()}" required></label>
+        <label class="field"><span>합사 종료일 (진행 중이면 비움)</span><input type="date" name="endDate" value="${entry?esc(entry.endDate||''):''}"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">취소</button>
+        <button type="submit" class="btn btn-primary">${entry?'수정':'추가'}</button>
+      </div>
+    </form>`;
+  openModal(entry?'합사 기록 수정':'합사 기록 추가', body);
+}
+async function saveCohabitLogEntry(matingId, entryId){
+  const m = state.matings.find(x=>x.id===matingId);
+  if(!m) return;
+  const fd = new FormData(document.getElementById('cohabit-log-form'));
+  const startDate = fd.get('startDate');
+  const endDate = fd.get('endDate') || null;
+  if(!m.cohabitLog) m.cohabitLog = [];
+  const isNewEntry = !entryId;
+  if(entryId){
+    const entry = m.cohabitLog.find(c=>c.id===entryId);
+    if(entry){ entry.startDate = startDate; entry.endDate = endDate; }
+  } else {
+    m.cohabitLog.push({ id:'coh'+Date.now().toString(36)+Math.random().toString(36).slice(2,5), startDate, endDate });
+  }
+  if(isNewEntry){
+    bumpBreedingLevel(state.individuals.find(i=>i.id===m.damId), 1); // 암컷: 합사 시작 -> 보류
+  }
+  await persistAndRender();
+  openMatingForm(matingId);
+}
+async function endCohabitToday(matingId, entryId){
+  const m = state.matings.find(x=>x.id===matingId);
+  if(!m || !m.cohabitLog) return;
+  const entry = m.cohabitLog.find(c=>c.id===entryId);
+  if(!entry) return;
+  entry.endDate = todayISO();
+  await persistAndRender();
+  openMatingForm(matingId);
+}
+async function deleteCohabitLogEntry(matingId, entryId){
+  if(!confirm('이 합사 기록을 삭제할까요?')) return;
+  const m = state.matings.find(x=>x.id===matingId);
+  if(!m || !m.cohabitLog) return;
+  m.cohabitLog = m.cohabitLog.filter(c=>c.id!==entryId);
+  await persistAndRender();
+  openMatingForm(matingId);
+}
+function renderCohabitLogListHtml(m){
+  const log = (m.cohabitLog||[]).slice().sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||''));
+  if(log.length===0) return `<div class="readonly-note">아직 기록된 합사 이력이 없어요.</div>`;
+  return log.map(c=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-top:1px dashed var(--border);">
+      <div>
+        <div style="font-family:var(--font-display);font-weight:700;font-size:13.5px;color:var(--pine-deep);">${esc(c.startDate)} ~ ${c.endDate?esc(c.endDate):'진행 중'}</div>
+        ${!c.endDate?`<span class="chip" style="margin-top:4px;display:inline-block;">합사 중</span>`:''}
+      </div>
+      <div style="display:flex;gap:4px;">
+        ${!c.endDate?`<button type="button" onclick="endCohabitToday('${m.id}','${c.id}')" class="btn btn-ghost" style="padding:6px 10px;font-size:12px;">오늘 종료</button>`:''}
+        <button type="button" onclick="openCohabitLogForm('${m.id}','${c.id}')" class="btn btn-ghost" style="padding:6px 10px;font-size:12px;">수정</button>
+        <button type="button" onclick="deleteCohabitLogEntry('${m.id}','${c.id}')" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;">삭제</button>
+      </div>
+    </div>
+  `).join('');
+}
+
 function renderMatingCard(m){
   const dam = state.individuals.find(i=>i.id===m.damId);
   const sire = state.individuals.find(i=>i.id===m.sireId);
@@ -2272,6 +2391,7 @@ function renderMatingCard(m){
   const cs = clutchesOfMating(m.id);
   const expanded = expandedMatings.has(m.id);
   const statusNorm = normalizeMatingStatus(m.status);
+  const activeCohab = activeCohabitation(m);
 
   let ddayLabel, ddayValue;
   if(dday.mode==='ended'){ ddayLabel='산란 종료'; ddayValue='종료'; }
@@ -2308,6 +2428,7 @@ function renderMatingCard(m){
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openMatingForm('${m.id}')">메이팅 정보 수정</button>
       </div>
       ${logDates.length?`<div class="mating-log">메이팅 기록: ${logDates.map(d=>esc(d)).join(' · ')}</div>`:''}
+      ${(m.cohabitLog||[]).length?`<div class="mating-log">합사 이력: ${(m.cohabitLog||[]).slice().sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||'')).map(c=>esc(c.startDate)+'~'+(c.endDate?esc(c.endDate):'진행중')).join(' · ')}</div>`:''}
     </div>`;
   }
 
@@ -2317,7 +2438,7 @@ function renderMatingCard(m){
         <div><div class="card-title">${esc(m.damName)} × ${esc(m.sireName)}</div><div class="card-id">${esc(m.id)}</div></div>
         <button class="chip ${statusNorm==='진행 중'?'':'muted'}" style="border:none;cursor:pointer;font-family:inherit;" onclick="event.stopPropagation(); toggleMatingStatus('${m.id}')">${statusNorm}</button>
       </div>
-      <div class="card-meta">${riskChip}</div>
+      <div class="card-meta">${riskChip}${activeCohab?`<span class="chip alt">🏠 합사 중 (${esc(activeCohab.startDate)}~)</span>`:''}</div>
       <div class="card-datarow">
         <div class="dcell"><div class="lbl">최근 메이팅일</div><div class="val">${lastMate?esc(lastMate):'-'}</div></div>
         <div class="dcell"><div class="lbl">${ddayLabel}</div><div class="val">${ddayValue}</div></div>
@@ -2348,6 +2469,8 @@ async function saveMatingLog(matingId){
   const date = new FormData(document.getElementById('matinglog-form')).get('date');
   if(!m.matingLog) m.matingLog = [];
   if(!m.matingLog.includes(date)) m.matingLog.push(date);
+  bumpBreedingLevel(state.individuals.find(i=>i.id===m.sireId), 2); // 수컷: 메이팅 -> 예
+  bumpBreedingLevel(state.individuals.find(i=>i.id===m.damId), 1);  // 암컷: 메이팅 -> 보류
   closeModal();
   await persistAndRender();
 }
@@ -2390,6 +2513,12 @@ function openMatingForm(id){
 
       ${!isNew?`<button type="button" class="btn btn-ghost btn-block" style="margin-top:6px;" onclick="openMatingLogForm('${id}');">+ 메이팅 기록(재메이팅) 추가</button>`:''}
 
+      ${!isNew?`
+      <div class="form-divider">합사 이력 (같이 지내게만 둔 기간)</div>
+      <button type="button" class="btn btn-ghost btn-block" style="margin-bottom:4px;" onclick="openCohabitLogForm('${id}');">+ 합사 기록 추가</button>
+      ${renderCohabitLogListHtml(data)}
+      `:''}
+
       <div class="modal-actions">
         ${!isNew?`<button type="button" class="btn btn-danger" onclick="deleteMating('${id}')">삭제</button>`:''}
         <button type="submit" class="btn btn-primary">${isNew?'추가':'저장'}</button>
@@ -2417,6 +2546,8 @@ async function saveMating(id){
     obj.matingLog = [obj.firstMatingDate || todayISO()];
     delete obj.firstMatingDate;
     state.matings.push(obj);
+    bumpBreedingLevel(state.individuals.find(i=>i.id===obj.sireId), 2); // 수컷: 메이팅 -> 예
+    bumpBreedingLevel(state.individuals.find(i=>i.id===obj.damId), 1);  // 암컷: 메이팅 -> 보류
   }
   closeModal();
   await persistAndRender();
@@ -2496,9 +2627,11 @@ async function saveClutch(id, matingId){
   const fd = new FormData(form);
   const obj = {};
   fd.forEach((v,k)=>obj[k]=v);
+  let damIdForBump = null;
   if(id){
     const item = state.clutches.find(c=>c.id===id);
     Object.assign(item, obj);
+    damIdForBump = item.damId;
   } else {
     const mating = state.matings.find(m=>m.id===matingId);
     obj.matingId = matingId;
@@ -2507,6 +2640,11 @@ async function saveClutch(id, matingId){
     const yy = currentYY();
     obj.id = nextEntityId('HCC-C'+yy+'-', state.clutches, 3);
     state.clutches.push(obj);
+    damIdForBump = obj.damId;
+  }
+  /* 유정란 기록이 생기면 그 알을 낳은 암컷은 '브리딩 여부'가 예(프루븐)로 자동 승격 */
+  if(obj.egg1Status==='유정' || obj.egg2Status==='유정'){
+    bumpBreedingLevel(state.individuals.find(i=>i.id===damIdForBump), 2);
   }
   closeModal();
   await persistAndRender();
@@ -3041,7 +3179,7 @@ function openHatchlingForm(id, prefill){
         <label class="field"><span>분양가</span><input type="text" inputmode="numeric" name="price" value="${formatNumberWithCommas(data.price)}" oninput="onPriceInputFormat(this)" placeholder="0"></label>
         <label class="field"><span>킵 여부</span><select name="keep">${selOpts(['예','아니오','보류'],data.keep)}</select></label>
         <label class="field"><span>브리딩 여부</span><select name="breeding">${selOpts(['예','아니오','보류'],data.breeding)}</select></label>
-        <label class="field"><span>메인 여부</span><select name="main">${selOpts(['예','아니오','보류'],data.main)}</select></label>
+        <label class="field"><span>메인/서브 여부</span><select name="main">${selOpts(['메인','서브','아니오','보류'],data.main)}</select></label>
         <label class="field"><span>현재 상태</span><select name="status" id="hatchStatusField" onchange="toggleSaleSection('hatch')">${selOpts(['보유','분양 중','분양 완료','사망','기타'],data.status)}</select></label>
       </div>
       <div id="hatchSaleSection" style="display:${data.status==='분양 완료'?'block':'none'};">
