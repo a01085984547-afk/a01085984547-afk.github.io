@@ -619,6 +619,18 @@ function migrateBackfillBreedingProven(st){
   });
   return changed;
 }
+/* 브리딩 여부가 어떤 경로로 예가 됐든(방금 자동승격/과거수동설정 등 상관없이),
+   예인데 프루븐이 아직 아니오인 개체가 있으면 항상 다시 맞춰준다. */
+function migrateSyncProvenWithBreeding(st){
+  let changed = false;
+  (st.individuals||[]).forEach(i=>{
+    if(i.breeding==='예' && i.provenStatus!=='예'){ i.provenStatus='예'; changed=true; }
+  });
+  (st.hatchlings||[]).forEach(h=>{
+    if(h.breeding==='예' && h.provenStatus!=='예'){ h.provenStatus='예'; changed=true; }
+  });
+  return changed;
+}
 /* 브리딩 여부/프루븐 자동 연동이 생기기 전부터 있던 기존 메이팅·클러치 기록을 한 번 소급 적용한다.
    (딱 한 번만 실행 - 이후엔 사용자가 손으로 낮춰도 다시 안 올라가게) */
 function migrateBreedingProvenFromHistory(st){
@@ -679,7 +691,8 @@ async function loadState(){
   const migratedSaleLabel = migrateSaleStatusLabel(state);
   const migratedMain = migrateMainToMainSub(state);
   const migratedBreeding = migrateBackfillBreedingProven(state);
-  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding){ await saveState(); }
+  const migratedProvenSync = migrateSyncProvenWithBreeding(state);
+  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding || migratedProvenSync){ await saveState(); }
 }
 async function saveState(){
   await storageSet(STORAGE_KEY, JSON.stringify(state));
