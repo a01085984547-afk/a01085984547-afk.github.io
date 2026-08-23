@@ -2477,7 +2477,13 @@ function renderMatingCard(m){
       rows = `<div class="readonly-note" style="margin:6px 0 10px;">아직 기록된 알이 없어요.</div>`;
     } else {
       cs.forEach(c=>{
-        const pred = predictHatchDates(c.layDate, c.incubationTemp||m.incubationTemp||DEFAULT_INCUBATION_TEMP);
+        const hasFertile = c.egg1Status==='유정' || c.egg2Status==='유정';
+        const pred = hasFertile ? predictHatchDates(c.layDate, c.incubationTemp||m.incubationTemp||DEFAULT_INCUBATION_TEMP) : null;
+        let rightText;
+        if(c.actualHatchCount) rightText = '해칭 '+c.actualHatchCount;
+        else if(!hasFertile) rightText = '무정';
+        else if(pred && pred.avgDate) rightText = '예정 '+fmtKo(pred.avgDate);
+        else rightText = '-';
         rows += `<div class="clutch-row" onclick="openClutchForm('${c.id}', '${m.id}')">
           <div class="cnum">${esc(c.clutchNum)}차</div>
           <div class="cmid">
@@ -2487,7 +2493,7 @@ function renderMatingCard(m){
             </span>
             &nbsp;${esc(c.layDate)||'-'}
           </div>
-          <div class="cright">${c.actualHatchCount?('해칭 '+c.actualHatchCount):(pred.avgDate?('예정 '+fmtKo(pred.avgDate)):'-')}</div>
+          <div class="cright">${rightText}</div>
         </div>`;
       });
     }
@@ -2513,7 +2519,7 @@ function renderMatingCard(m){
       <div class="card-datarow">
         <div class="dcell"><div class="lbl">${activityLabel}</div><div class="val">${activityDate?esc(activityDate):'-'}</div></div>
         <div class="dcell"><div class="lbl">${ddayLabel}</div><div class="val">${ddayValue}</div></div>
-        <div class="dcell"><div class="lbl">누적 클러치</div><div class="val">${cs.length}건</div></div>
+        <div class="dcell"><div class="lbl">누적 클러치</div><div class="val">${cs.filter(c=>c.egg1Status==='유정'||c.egg2Status==='유정').length}건</div></div>
       </div>
     </div>
     ${detail}
@@ -3574,7 +3580,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 23:12 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 23:19 KST</span>
   </div></div>`;
 
   return html;
