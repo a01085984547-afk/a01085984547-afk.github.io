@@ -1292,6 +1292,7 @@ function renderIndividualListBody(items){
       ${(i.morphPatterns||[]).map(p=>`<span class="chip muted">${esc(p)}</span>`).join('')}
       ${(i.morphColors||[]).map(c=>`<span class="chip muted">${esc(c)}</span>`).join('')}
       ${i.dotStatus==='있음'?`<span class="chip alt">점 있음</span>`:''}
+      ${(()=>{const w=latestWeightEntry(i);return w?`<span class="chip muted">${w.grams}g</span>`:'';})()}
       ${i.status?`<span class="chip ${i.status==='보유'?'':'muted'}">${esc(i.status)}</span>`:''}
       ${i.breeding==='예'?`<span class="chip">브리딩</span>`:''}
       ${i.main==='예'?`<span class="chip alt">메인</span>`:''}
@@ -1418,6 +1419,7 @@ function renderHatchlingListBody(items){
       ${(h.morphPatterns||[]).map(p=>`<span class="chip muted">${esc(p)}</span>`).join('')}
       ${(h.morphColors||[]).map(c=>`<span class="chip muted">${esc(c)}</span>`).join('')}
       ${h.dotStatus==='있음'?`<span class="chip alt">점 있음</span>`:''}
+      ${(()=>{const w=latestWeightEntry(h);return w?`<span class="chip muted">${w.grams}g</span>`:'';})()}
       ${h.promotedToId?`<span class="chip">개체 등록됨</span>`:''}
       ${h.price?`<span class="chip muted">${fmtMoney(h.price)}</span>`:''}
     </div>
@@ -1838,6 +1840,73 @@ function updateParentBloodlineCheck(){
   box.innerHTML = '';
 }
 
+/* ---------------- 체중(성장) 기록 - 개체/해칭개체 공용 ---------------- */
+function getWeightEntity(kind, id){
+  return kind==='individual' ? state.individuals.find(i=>i.id===id) : state.hatchlings.find(h=>h.id===id);
+}
+function sortedWeightLog(entity){
+  return (entity.weightLog||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+}
+function latestWeightEntry(entity){
+  const log = sortedWeightLog(entity);
+  return log.length ? log[0] : null;
+}
+function openWeightLogAddForm(kind, id){
+  const body = `
+    <form id="weight-log-form" onsubmit="event.preventDefault(); saveWeightLogEntry('${kind}','${id}');">
+      <div class="form-grid">
+        <label class="field"><span>측정일</span><input type="date" name="date" value="${todayISO()}" required></label>
+        <label class="field"><span>무게(g)</span><input type="number" name="grams" min="0" step="0.1" required placeholder="예: 42"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary btn-block">추가</button>
+      </div>
+    </form>
+  `;
+  openModal('체중 기록 추가', body);
+}
+async function saveWeightLogEntry(kind, id){
+  const form = document.getElementById('weight-log-form');
+  const fd = new FormData(form);
+  const date = fd.get('date');
+  const grams = parseFloat(fd.get('grams'));
+  if(!date || isNaN(grams)) return;
+  const entity = getWeightEntity(kind, id);
+  if(!entity) return;
+  if(!entity.weightLog) entity.weightLog = [];
+  entity.weightLog.push({ id:'w'+Date.now().toString(36)+Math.random().toString(36).slice(2,5), date, grams });
+  await persistAndRender();
+  if(kind==='individual') openIndividualDetail(id); else openHatchlingDetail(id);
+}
+async function deleteWeightLogEntry(kind, id, entryId){
+  if(!confirm('이 체중 기록을 삭제할까요?')) return;
+  const entity = getWeightEntity(kind, id);
+  if(!entity || !entity.weightLog) return;
+  entity.weightLog = entity.weightLog.filter(w=>w.id!==entryId);
+  await persistAndRender();
+  if(kind==='individual') openIndividualDetail(id); else openHatchlingDetail(id);
+}
+function renderWeightLogSectionContent(kind, entity){
+  const log = sortedWeightLog(entity);
+  let html = `<button type="button" class="btn btn-ghost btn-block" style="margin-bottom:8px;" onclick="openWeightLogAddForm('${kind}','${entity.id}')">+ 체중 기록 추가</button>`;
+  if(log.length===0){
+    html += `<div class="readonly-note">아직 기록된 체중이 없어요.</div>`;
+  } else {
+    html += `<div style="max-height:210px;overflow-y:auto;">`;
+    html += log.map(w=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 2px;border-top:1px dashed var(--border);">
+        <div>
+          <div style="font-size:11px;color:var(--ink-faint);">${esc(w.date)}</div>
+          <div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--pine-deep);">${w.grams}g</div>
+        </div>
+        <button type="button" onclick="deleteWeightLogEntry('${kind}','${entity.id}','${w.id}')" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;padding:4px 8px;">삭제</button>
+      </div>
+    `).join('');
+    html += `</div>`;
+  }
+  return html;
+}
+
 /* ---------------- 접이식 섹션(부모정보/사육상태 등 공용) ---------------- */
 function collapsibleSection(id, title, contentHtml, defaultOpen){
   return `<div class="chipgroup-wrap" style="margin-bottom:12px;">
@@ -1943,6 +2012,9 @@ function openIndividualDetail(id){
     ${ind.status==='분양 완료'?`<div class="readonly-note">분양: ${esc(ind.salePlatform)||'-'} · ${esc(ind.saleDate)||'-'} · ${ind.salePrice?fmtMoney(ind.salePrice):'-'}</div>`:(ind.salePrice?`<div class="readonly-note">분양가: ${fmtMoney(ind.salePrice)}</div>`:'')}
   `;
   body += collapsibleSection('viewStatus', '사육 상태', statusContent, false);
+
+  const lastWeight = latestWeightEntry(ind);
+  body += collapsibleSection('viewWeight', lastWeight?`성장 보기 · 최근 ${lastWeight.grams}g (${lastWeight.date})`:'성장 보기', renderWeightLogSectionContent('individual', ind), false);
 
   if(ind.memo){
     body += `<div class="form-divider">메모</div><div class="readonly-note">${esc(ind.memo)}</div>`;
@@ -2884,6 +2956,9 @@ function openHatchlingDetail(id){
   `;
   body += collapsibleSection('viewHatchStatus', '사육 상태', statusContent, false);
 
+  const lastWeight = latestWeightEntry(h);
+  body += collapsibleSection('viewHatchWeight', lastWeight?`성장 보기 · 최근 ${lastWeight.grams}g (${lastWeight.date})`:'성장 보기', renderWeightLogSectionContent('hatchling', h), false);
+
   if(h.note){
     body += `<div class="form-divider">메모</div><div class="readonly-note">${esc(h.note)}</div>`;
   }
@@ -3337,9 +3412,11 @@ async function exportExcelBackup(){
     const indRows = state.individuals.map(i=>({
       '개체ID': i.id, '이름': i.name||'', '성별': i.gender||'', '해칭일': i.hatchDate||'',
       '모프': i.morph||'', '헷여부': i.morphHet||'', '패턴': (i.morphPatterns||[]).join(', '), '컬러': (i.morphColors||[]).join(', '),
-      '출신구분': i.originType||'', '출신업체': i.originCompany||'',
+      '점여부': i.dotStatus||'', '출신구분': i.originType||'', '출신업체': i.originCompany||'',
       '부이름': i.sireName||'', '부모프': i.sireMorph||'', '부헷': i.sireHet||'',
       '모이름': i.damName||'', '모모프': i.damMorph||'', '모헷': i.damHet||'',
+      '최근무정란산란일(혼자낳음)': i.lastSoloInfertileLayDate||'',
+      '최근체중(g)': (latestWeightEntry(i)||{}).grams||'', '최근체중측정일': (latestWeightEntry(i)||{}).date||'',
       '킵여부': i.keep||'', '브리딩여부': i.breeding||'', '메인여부': i.main||'', '현재상태': i.status||'',
       '분양플랫폼': i.salePlatform||'', '분양일': i.saleDate||'', '분양가': i.salePrice||'',
       '메모': i.memo||''
@@ -3365,7 +3442,9 @@ async function exportExcelBackup(){
       '해칭ID': h.id, '클러치ID': h.clutchId||'', '알번호': h.eggLabel||'', '해칭일': h.hatchDate||'',
       '인큐베이션일수': h.incubationDays||'', '모이름': h.damName||'', '부이름': h.sireName||'',
       '확정모프': h.morph||'', '헷': h.morphHet||'', '패턴': (h.morphPatterns||[]).join(', '), '컬러': (h.morphColors||[]).join(', '),
-      '성별': h.gender||'', '점여부': h.dotStatus||'', '킵': h.keep||'', '브리딩': h.breeding||'', '메인': h.main||'', '상태': h.status||'',
+      '성별': h.gender||'', '점여부': h.dotStatus||'',
+      '최근체중(g)': (latestWeightEntry(h)||{}).grams||'', '최근체중측정일': (latestWeightEntry(h)||{}).date||'',
+      '킵': h.keep||'', '브리딩': h.breeding||'', '메인': h.main||'', '상태': h.status||'',
       '분양플랫폼': h.salePlatform||'', '분양일': h.saleDate||'', '분양가': h.price||'',
       '개체등록여부': h.promotedToId ? ('등록됨('+h.promotedToId+')') : '',
       '메모': h.note||''
