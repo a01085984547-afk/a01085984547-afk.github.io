@@ -2802,7 +2802,7 @@ function renderEggTab(){
     </div>
   </div>`;
 
-  const matingIds = [...new Set(state.clutches.map(c=>c.matingId).filter(Boolean))];
+  const matingIds = [...new Set(state.clutches.filter(c=>c.egg1Status==='유정'||c.egg2Status==='유정').map(c=>c.matingId).filter(Boolean))];
   if(matingIds.length===0){
     html += `<div class="empty-state"><div class="dotrow"><span></span><span></span><span></span><span></span><span></span></div><p>등록된 알 기록이 없어요.</p></div>`;
     return html;
@@ -2811,7 +2811,7 @@ function renderEggTab(){
   let groups = matingIds.map(mid=>{
     const mating = state.matings.find(m=>m.id===mid);
     const cs = clutchesOfMating(mid);
-    return { matingId:mid, mating, clutches:cs, lastMate: mating?latestMatingDate(mating):null, done:isEggGroupFullyDone(cs, mating) };
+    return { matingId:mid, mating, clutches:cs, activity: mating?latestMatingActivity(mating):null, done:isEggGroupFullyDone(cs, mating) };
   }).filter(g=>g.clutches.length>0);
 
   const endedCount = groups.filter(g=>g.done).length;
@@ -2847,10 +2847,18 @@ function renderEggTab(){
 }
 
 function renderEggGroupCard(g){
-  const { matingId, mating, clutches:cs, lastMate } = g;
+  const { matingId, mating, clutches:cs, activity } = g;
   const expanded = expandedEggGroups.has(matingId);
   const damName = cs[0].damName, sireName = cs[0].sireName;
-  const openCount = cs.filter(c=>!c.actualHatchCount).length;
+  const openCount = cs.reduce((sum,c)=>{
+    let n = 0;
+    if(c.egg1Status==='유정' && !hatchlingForEgg(c.id,'A')) n++;
+    if(c.egg2Status==='유정' && !hatchlingForEgg(c.id,'B')) n++;
+    return sum + n;
+  }, 0);
+  const fertileClutchCount = cs.filter(c=>c.egg1Status==='유정'||c.egg2Status==='유정').length;
+  const activityLabel = activity && activity.source==='cohabit' ? '최근 합사일' : '최근 메이팅일';
+  const activityDate = activity ? activity.date : null;
 
   let detail = '';
   if(expanded){
@@ -2883,10 +2891,10 @@ function renderEggGroupCard(g){
   return `<div class="mating-card">
     <div class="mating-head" onclick="toggleEggGroup('${matingId}')">
       <div class="card-top">
-        <div><div class="card-title">${esc(damName)} × ${esc(sireName)}</div><div class="card-id">최근 메이팅일 ${lastMate?esc(lastMate):'-'}</div></div>
+        <div><div class="card-title">${esc(damName)} × ${esc(sireName)}</div><div class="card-id">${activityLabel} ${activityDate?esc(activityDate):'-'}</div></div>
         <div class="chip ${openCount>0?'alt':''}">${openCount>0?(openCount+'건 대기'):'모두 해칭'}</div>
       </div>
-      <div class="card-meta"><span class="chip muted">누적 ${cs.length}클러치</span></div>
+      <div class="card-meta"><span class="chip muted">누적 ${fertileClutchCount}클러치</span></div>
     </div>
     ${detail}
   </div>`;
@@ -3580,7 +3588,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 23:19 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 23:26 KST</span>
   </div></div>`;
 
   return html;
