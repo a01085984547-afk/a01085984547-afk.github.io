@@ -716,6 +716,16 @@ function latestCohabitReferenceDate(mating){
 function activeCohabitation(mating){
   return (mating.cohabitLog||[]).find(c=>c.startDate && !c.endDate) || null;
 }
+/* 최근 활동이 실제 '메이팅' 기록에서 온 건지 '합사' 기록에서 온 건지 구분해서 라벨을 다르게 붙일 수 있게 */
+function latestMatingActivity(mating){
+  const candidates = [];
+  (mating.matingLog||[]).forEach(d=>{ if(d) candidates.push({date:d, source:'mating'}); });
+  const cohabDate = latestCohabitReferenceDate(mating);
+  if(cohabDate) candidates.push({date:cohabDate, source:'cohabit'});
+  if(candidates.length===0) return null;
+  candidates.sort((a,b)=>a.date.localeCompare(b.date));
+  return candidates[candidates.length-1];
+}
 function latestMatingDate(mating){
   const dates = [];
   if(mating.matingLog && mating.matingLog.length) dates.push(...mating.matingLog);
@@ -2443,17 +2453,20 @@ function renderMatingCard(m){
     if(r.level==='danger') riskChip = `<span class="chip danger">혈통 위험</span>`;
     else if(r.level==='warning') riskChip = `<span class="chip alt">혈통 주의</span>`;
   }
-  const lastMate = latestMatingDate(m);
   const nextNum = nextClutchNum(m);
   const dday = matingDdayInfo(m);
   const cs = clutchesOfMating(m.id);
   const expanded = expandedMatings.has(m.id);
   const statusNorm = normalizeMatingStatus(m.status);
   const activeCohab = activeCohabitation(m);
+  const activity = latestMatingActivity(m);
+  const activityIsCohab = activity && activity.source==='cohabit';
+  const activityLabel = activityIsCohab ? '최근 합사일' : '최근 메이팅일';
+  const activityDate = activity ? activity.date : null;
 
   let ddayLabel, ddayValue;
   if(dday.mode==='ended'){ ddayLabel='산란 종료'; ddayValue='종료'; }
-  else if(dday.mode==='waiting'){ ddayLabel='메이팅 후 경과'; ddayValue=`D+${dday.elapsed}`; }
+  else if(dday.mode==='waiting'){ ddayLabel=activityIsCohab?'합사 후 경과':'메이팅 후 경과'; ddayValue=`D+${dday.elapsed}`; }
   else if(dday.mode==='predicted'){ ddayLabel=`${nextNum}차 산란예정일`; ddayValue=`${fmtKo(dday.date)} (${formatDday(dday.diff)})`; }
   else { ddayLabel=`${nextNum}차 산란예정일`; ddayValue='-'; }
 
@@ -2498,7 +2511,7 @@ function renderMatingCard(m){
       </div>
       <div class="card-meta">${riskChip}${activeCohab?`<span class="chip alt">🏠 합사 중 (${esc(activeCohab.startDate)}~)</span>`:''}</div>
       <div class="card-datarow">
-        <div class="dcell"><div class="lbl">최근 메이팅일</div><div class="val">${lastMate?esc(lastMate):'-'}</div></div>
+        <div class="dcell"><div class="lbl">${activityLabel}</div><div class="val">${activityDate?esc(activityDate):'-'}</div></div>
         <div class="dcell"><div class="lbl">${ddayLabel}</div><div class="val">${ddayValue}</div></div>
         <div class="dcell"><div class="lbl">누적 클러치</div><div class="val">${cs.length}건</div></div>
       </div>
@@ -2565,8 +2578,10 @@ function openMatingForm(id){
         <label class="field"><span>산란 주기(일)</span><input type="number" name="cycleDays" value="${data.cycleDays||DEFAULT_CYCLE_DAYS}" min="1"></label>
         <label class="field"><span>기본 인큐베이션 온도(°C)</span><input type="number" name="incubationTemp" step="0.1" value="${data.incubationTemp||DEFAULT_INCUBATION_TEMP}"></label>
         <label class="field"><span>산란 종료일(기록용, 선택)</span><input type="date" name="seasonEndDate" value="${esc(data.seasonEndDate||'')}"></label>
-        ${isNew?`<label class="field"><span>메이팅 날짜</span><input type="date" name="firstMatingDate" value="${todayISO()}" required></label>`:''}
+        ${isNew?`<label class="field"><span>메이팅 날짜 (선택 - 짝짓기를 확인한 경우)</span><input type="date" name="firstMatingDate"></label>`:''}
+        ${isNew?`<label class="field"><span>합사 시작일 (선택 - 그냥 합사만 시킨 경우)</span><input type="date" name="firstCohabitDate"></label>`:''}
       </div>
+      ${isNew?`<div class="readonly-note" style="margin-top:-8px;">둘 중 최소 하나는 채워주세요. 실제 짝짓기를 봤으면 메이팅 날짜에, 그냥 같이 살게만 뒀으면 합사 시작일에 적어주세요. 둘 다 채워도 돼요.</div>`:''}
       <div class="readonly-note">상태를 '산란 종료'로 바꾸면 다음 산란예정일 계산이 멈춰요. 카드에서 상태 칩을 눌러도 바로 전환돼요.</div>
 
       ${!isNew?`<button type="button" class="btn btn-ghost btn-block" style="margin-top:6px;" onclick="openMatingLogForm('${id}');">+ 메이팅 기록(재메이팅) 추가</button>`:''}
@@ -2600,12 +2615,29 @@ async function saveMating(id){
     const item = state.matings.find(m=>m.id===id);
     Object.assign(item, obj);
   } else {
-    obj.id = nextEntityId('HCC-P-', state.matings, 4);
-    obj.matingLog = [obj.firstMatingDate || todayISO()];
+    const matingDate = obj.firstMatingDate || '';
+    const cohabitDate = obj.firstCohabitDate || '';
     delete obj.firstMatingDate;
+    delete obj.firstCohabitDate;
+    if(!matingDate && !cohabitDate){
+      alert('메이팅 날짜나 합사 시작일 중 하나는 입력해주세요.');
+      return;
+    }
+    obj.id = nextEntityId('HCC-P-', state.matings, 4);
+    obj.matingLog = matingDate ? [matingDate] : [];
+    if(cohabitDate){
+      obj.cohabitLog = [{ id:'coh'+Date.now().toString(36)+Math.random().toString(36).slice(2,5), startDate: cohabitDate, endDate: null }];
+    }
     state.matings.push(obj);
-    bumpBreedingLevel(state.individuals.find(i=>i.id===obj.sireId), 2); // 수컷: 메이팅 -> 예
-    bumpBreedingLevel(state.individuals.find(i=>i.id===obj.damId), 1);  // 암컷: 메이팅 -> 보류
+    const sire = state.individuals.find(i=>i.id===obj.sireId);
+    const dam = state.individuals.find(i=>i.id===obj.damId);
+    if(matingDate){
+      bumpBreedingLevel(sire, 2); // 수컷: 메이팅 -> 예
+      bumpBreedingLevel(dam, 1);  // 암컷: 메이팅 -> 보류
+    }
+    if(cohabitDate){
+      bumpBreedingLevel(dam, 1); // 암컷: 합사 시작 -> 보류
+    }
   }
   closeModal();
   await persistAndRender();
@@ -3542,7 +3574,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 20:39 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 23:12 KST</span>
   </div></div>`;
 
   return html;
