@@ -324,10 +324,18 @@ function bumpBreedingLevel(individual, suggestedLevel){
   const current = breedingLevelOf(individual.breeding);
   if(suggestedLevel > current){
     individual.breeding = BREEDING_LEVEL_NAMES[suggestedLevel];
-    if(suggestedLevel>=2) individual.provenStatus = '예';
     return true;
   }
   return false;
+}
+/* 프루븐(증명됨)은 브리딩 예로 올라가는 것과 별개로, 실제 유정란이 나왔을 때만 세운다.
+   (수컷도 정자가 없는 경우가 있어서, 메이팅만으로는 증명됐다고 볼 수 없음) */
+function markProven(individual){
+  if(!individual) return false;
+  let changed = false;
+  if(individual.provenStatus!=='예'){ individual.provenStatus='예'; changed=true; }
+  if(bumpBreedingLevel(individual, 2)) changed = true;
+  return changed;
 }
 
 /* ---------------- 부화기간 온도표 + 보간 ---------------- */
@@ -613,46 +621,12 @@ function migrateBackfillBreedingProven(st){
   });
   (st.clutches||[]).forEach(c=>{
     if(c.egg1Status==='유정' || c.egg2Status==='유정'){
-      const dam = (st.individuals||[]).find(i=>i.id===c.damId);
-      if(bumpBreedingLevel(dam, 2)) changed = true;
+      if(markProven((st.individuals||[]).find(i=>i.id===c.damId))) changed = true;
+      if(markProven((st.individuals||[]).find(i=>i.id===c.sireId))) changed = true;
     }
   });
   return changed;
 }
-/* 브리딩 여부가 어떤 경로로 예가 됐든(방금 자동승격/과거수동설정 등 상관없이),
-   예인데 프루븐이 아직 아니오인 개체가 있으면 항상 다시 맞춰준다. */
-function migrateSyncProvenWithBreeding(st){
-  let changed = false;
-  (st.individuals||[]).forEach(i=>{
-    if(i.breeding==='예' && i.provenStatus!=='예'){ i.provenStatus='예'; changed=true; }
-  });
-  (st.hatchlings||[]).forEach(h=>{
-    if(h.breeding==='예' && h.provenStatus!=='예'){ h.provenStatus='예'; changed=true; }
-  });
-  return changed;
-}
-/* 브리딩 여부/프루븐 자동 연동이 생기기 전부터 있던 기존 메이팅·클러치 기록을 한 번 소급 적용한다.
-   (딱 한 번만 실행 - 이후엔 사용자가 손으로 낮춰도 다시 안 올라가게) */
-function migrateBreedingProvenFromHistory(st){
-  if(st._breedingHistoryMigrated) return false;
-  (st.matings||[]).forEach(m=>{
-    if(m.matingLog && m.matingLog.length>0){
-      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===m.sireId), 2);
-      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===m.damId), 1);
-    }
-    if(m.cohabitLog && m.cohabitLog.length>0){
-      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===m.damId), 1);
-    }
-  });
-  (st.clutches||[]).forEach(c=>{
-    if(c.egg1Status==='유정' || c.egg2Status==='유정'){
-      bumpBreedingLevel((st.individuals||[]).find(i=>i.id===c.damId), 2);
-    }
-  });
-  st._breedingHistoryMigrated = true;
-  return true;
-}
-
 /* ---------------- storage ---------------- */
 /* 저장소: Claude 아티팩트 환경(window.storage)에서 열었을 때는 그걸 쓰고,
    폰에 설치해서 독립 실행할 때는 브라우저 localStorage로 자동 전환된다. */
@@ -691,8 +665,7 @@ async function loadState(){
   const migratedSaleLabel = migrateSaleStatusLabel(state);
   const migratedMain = migrateMainToMainSub(state);
   const migratedBreeding = migrateBackfillBreedingProven(state);
-  const migratedProvenSync = migrateSyncProvenWithBreeding(state);
-  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding || migratedProvenSync){ await saveState(); }
+  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding){ await saveState(); }
 }
 async function saveState(){
   await storageSet(STORAGE_KEY, JSON.stringify(state));
@@ -2722,11 +2695,11 @@ async function saveClutch(id, matingId){
   const fd = new FormData(form);
   const obj = {};
   fd.forEach((v,k)=>obj[k]=v);
-  let damIdForBump = null;
+  let damIdForBump = null, sireIdForBump = null;
   if(id){
     const item = state.clutches.find(c=>c.id===id);
     Object.assign(item, obj);
-    damIdForBump = item.damId;
+    damIdForBump = item.damId; sireIdForBump = item.sireId;
   } else {
     const mating = state.matings.find(m=>m.id===matingId);
     obj.matingId = matingId;
@@ -2735,11 +2708,13 @@ async function saveClutch(id, matingId){
     const yy = currentYY();
     obj.id = nextEntityId('HCC-C'+yy+'-', state.clutches, 3);
     state.clutches.push(obj);
-    damIdForBump = obj.damId;
+    damIdForBump = obj.damId; sireIdForBump = obj.sireId;
   }
-  /* 유정란 기록이 생기면 그 알을 낳은 암컷은 '브리딩 여부'가 예(프루븐)로 자동 승격 */
+  /* 유정란은 그 알을 낳은 암컷·수컷 둘 다 실제로 증명(프루븐)됐다는 뜻 - 수컷도 정자가 없는 경우가
+     있어서, 메이팅만으로는 증명이 아니고 실제 유정란이 나와야 프루븐으로 올림 */
   if(obj.egg1Status==='유정' || obj.egg2Status==='유정'){
-    bumpBreedingLevel(state.individuals.find(i=>i.id===damIdForBump), 2);
+    markProven(state.individuals.find(i=>i.id===damIdForBump));
+    markProven(state.individuals.find(i=>i.id===sireIdForBump));
   }
   closeModal();
   await persistAndRender();
@@ -2819,7 +2794,7 @@ function renderEggTab(){
   }
 
   groups.sort((a,b)=>{
-    const av=a.lastMate||'', bv=b.lastMate||'';
+    const av=(a.activity?a.activity.date:'')||'', bv=(b.activity?b.activity.date:'')||'';
     return eggGroupSort==='recent' ? bv.localeCompare(av) : av.localeCompare(bv);
   });
 
@@ -3587,7 +3562,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 11:41 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 11:48 KST</span>
   </div></div>`;
 
   return html;
