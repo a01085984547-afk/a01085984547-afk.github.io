@@ -708,8 +708,7 @@ function latestCohabitReferenceDate(mating){
   const log = mating.cohabitLog || [];
   let latest = null;
   log.forEach(c=>{
-    const ref = c.endDate || c.startDate; // 종료됐으면 종료일, 진행 중이면 시작일을 기준으로
-    if(ref && (!latest || ref>latest)) latest = ref;
+    if(c.startDate && (!latest || c.startDate>latest)) latest = c.startDate;
   });
   return latest;
 }
@@ -3588,7 +3587,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-23 23:26 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 11:41 KST</span>
   </div></div>`;
 
   return html;
