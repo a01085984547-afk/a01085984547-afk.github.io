@@ -683,7 +683,7 @@ async function loadState(){
 }
 async function saveState(){
   await storageSet(STORAGE_KEY, JSON.stringify(state));
-  if(firestoreDb){ await pushStateToCloud(); }
+  if(firestoreDb){ await pushChangedEntitiesToCloud(); }
 }
 async function persistAndRender(){ await saveState(); render(); }
 
@@ -3456,13 +3456,12 @@ async function confirmPromote(hatchId){
 ===================================================================== */
 
 const FIREBASE_CONFIG_KEY = 'hotchoco_firebase_config_v1';
-const SYNC_DOC_PATH = ['hotchoco_shared', 'state'];
+const RECORDS_COLLECTION = 'hotchoco_records';
+const KIND_TO_LIST = { individual:'individuals', mating:'matings', clutch:'clutches', hatchling:'hatchlings' };
 
 let syncStatus = 'local'; // 'local' | 'connecting' | 'synced' | 'error'
 let firestoreDb = null;
-let suppressNextSnapshot = false;
-let firstSnapshotResolved = null; // resolve fn for the init-time wait
-let lastKnownRemoteUpdatedAt = 0; // 마지막으로 받아본 클라우드 데이터의 타임스탬프
+let lastSyncedSnapshot = {}; // id -> 마지막으로 클라우드와 맞춰본 JSON 문자열 (변경분만 골라 올리기 위한 기준)
 
 function getFirebaseConfig(){
   try{
@@ -3501,7 +3500,9 @@ async function loadFirebaseSDK(){
   }
 }
 
-/* 초기 연결: 설정이 있으면 원격 데이터가 올 때까지(최대 4초) 기다렸다가 render */
+/* 동기화 구조: 개체 하나하나를 각자 별도 문서로 저장(컬렉션 hotchoco_records, 문서ID=그 개체의 고유번호).
+   Firestore 문서 1개당 1MB 제한이 있는데, 예전처럼 전체를 문서 하나에 몰아넣으면 사진이 쌓이면서
+   금방 한계에 부딪힘 - 개체별로 쪼개면 한 마리 사진 몇 장 갖고는 절대 한계에 안 부딪힘. */
 function initSync(){
   return new Promise(async (resolve)=>{
     const cfg = getFirebaseConfig();
@@ -3515,36 +3516,54 @@ function initSync(){
       }
       await firebase.auth().signInAnonymously();
       firestoreDb = firebase.firestore();
-      const docRef = firestoreDb.collection(SYNC_DOC_PATH[0]).doc(SYNC_DOC_PATH[1]);
+      const colRef = firestoreDb.collection(RECORDS_COLLECTION);
 
       let resolved = false;
       const timeout = setTimeout(()=>{
-        if(!resolved){ resolved = true; resolve(); } // 네트워크 느리면 로컬 데이터로 우선 표시
-      }, 4000);
+        if(!resolved){ resolved = true; syncStatus = syncStatus==='connecting'?'error':syncStatus; resolve(); }
+      }, 6000);
 
-      docRef.onSnapshot(snap=>{
-        if(suppressNextSnapshot){ suppressNextSnapshot = false; return; }
-        if(snap.exists){
-          const remote = snap.data();
-          if(remote && remote.json){
-            try{
-              state = JSON.parse(remote.json);
-              lastKnownRemoteUpdatedAt = remote.updatedAt || Date.now();
-              syncStatus = 'synced';
-            }catch(e){ /* ignore parse error */ }
+      const snap = await colRef.get();
+      if(snap.empty){
+        await pushAllEntitiesToCloud();
+      } else {
+        const newState = { individuals:[], matings:[], clutches:[], hatchlings:[] };
+        lastSyncedSnapshot = {};
+        snap.forEach(doc=>{
+          const d = doc.data();
+          const listKey = KIND_TO_LIST[d.kind];
+          if(!listKey || !d.data) return;
+          newState[listKey].push(d.data);
+          lastSyncedSnapshot[doc.id] = JSON.stringify(d.data);
+        });
+        state = newState;
+      }
+      syncStatus = 'synced';
+      if(!resolved){ resolved = true; clearTimeout(timeout); resolve(); }
+
+      colRef.onSnapshot(liveSnap=>{
+        let changedAny = false;
+        liveSnap.docChanges().forEach(change=>{
+          const d = change.doc.data();
+          const listKey = KIND_TO_LIST[d.kind];
+          if(!listKey) return;
+          if(change.type==='removed'){
+            state[listKey] = (state[listKey]||[]).filter(x=>x.id!==change.doc.id);
+            delete lastSyncedSnapshot[change.doc.id];
+            changedAny = true;
+          } else {
+            if(!d.data) return;
+            const idx = (state[listKey]||[]).findIndex(x=>x.id===change.doc.id);
+            if(idx>=0) state[listKey][idx] = d.data;
+            else { if(!state[listKey]) state[listKey]=[]; state[listKey].push(d.data); }
+            lastSyncedSnapshot[change.doc.id] = JSON.stringify(d.data);
+            changedAny = true;
           }
-        } else {
-          // 원격에 아직 문서가 없으면 지금 상태를 최초 데이터로 업로드
-          pushStateToCloud();
-          syncStatus = 'synced';
-        }
-        if(!resolved){ resolved = true; clearTimeout(timeout); resolve(); }
-        else { render(); }
+        });
+        if(changedAny) render();
       }, err=>{
         console.error('동기화 오류', err);
         syncStatus = 'error';
-        if(!resolved){ resolved = true; clearTimeout(timeout); resolve(); }
-        else { render(); }
       });
     }catch(e){
       console.error('Firebase 초기화 실패', e);
@@ -3554,33 +3573,58 @@ function initSync(){
   });
 }
 
-async function pushStateToCloud(){
+async function pushAllEntitiesToCloud(){
   if(!firestoreDb) return;
-  const docRef = firestoreDb.collection(SYNC_DOC_PATH[0]).doc(SYNC_DOC_PATH[1]);
-  try{
-    /* 밀어넣기 전에 클라우드에 내가 아직 못 받아본 더 최신 변경이 있는지 먼저 확인한다.
-       (다른 기기가 방금 막 저장한 걸 모른 채 내 걸로 덮어쓰면, 그 사람 수정이 조용히 사라져버림 -
-       그래서 그런 경우엔 무작정 덮지 않고 최신 내용을 먼저 받아온 뒤 사용자에게 알린다) */
-    const snap = await docRef.get();
-    if(snap.exists){
-      const remote = snap.data();
-      if(remote && remote.updatedAt && remote.updatedAt > lastKnownRemoteUpdatedAt){
-        lastKnownRemoteUpdatedAt = remote.updatedAt;
-        if(remote.json){
-          try{ state = JSON.parse(remote.json); }catch(e){}
-        }
-        render();
-        alert('다른 기기에서 방금 저장한 내용이 있어서 그 내용을 먼저 불러왔어요. 방금 하신 수정이 반영 안 됐다면 다시 한 번 해주세요.');
-        return;
-      }
+  const colRef = firestoreDb.collection(RECORDS_COLLECTION);
+  const batch = firestoreDb.batch();
+  let count = 0;
+  Object.keys(KIND_TO_LIST).forEach(kind=>{
+    const listKey = KIND_TO_LIST[kind];
+    (state[listKey]||[]).forEach(item=>{
+      batch.set(colRef.doc(item.id), { kind, data: item, updatedAt: Date.now() });
+      lastSyncedSnapshot[item.id] = JSON.stringify(item);
+      count++;
+    });
+  });
+  if(count>0){
+    try{ await batch.commit(); }catch(e){ console.error('초기 업로드 실패', e); }
+  }
+}
+
+/* 저장할 때마다 전체를 다시 밀어넣지 않고, 마지막으로 클라우드와 맞춰본 이후 실제로
+   바뀐(추가/수정/삭제된) 개체만 골라서 올린다. */
+async function pushChangedEntitiesToCloud(){
+  if(!firestoreDb) return;
+  const colRef = firestoreDb.collection(RECORDS_COLLECTION);
+  const currentMap = {};
+  Object.keys(KIND_TO_LIST).forEach(kind=>{
+    const listKey = KIND_TO_LIST[kind];
+    (state[listKey]||[]).forEach(item=>{
+      if(item && item.id) currentMap[item.id] = { kind, item, json: JSON.stringify(item) };
+    });
+  });
+  const batch = firestoreDb.batch();
+  let hasChanges = false;
+  Object.keys(currentMap).forEach(id=>{
+    const { kind, item, json } = currentMap[id];
+    if(lastSyncedSnapshot[id] !== json){
+      batch.set(colRef.doc(id), { kind, data: item, updatedAt: Date.now() });
+      hasChanges = true;
     }
-    suppressNextSnapshot = true;
-    const now = Date.now();
-    await docRef.set({ json: JSON.stringify(state), updatedAt: now });
-    lastKnownRemoteUpdatedAt = now;
+  });
+  Object.keys(lastSyncedSnapshot).forEach(id=>{
+    if(!(id in currentMap)){
+      batch.delete(colRef.doc(id));
+      hasChanges = true;
+    }
+  });
+  if(!hasChanges) return;
+  try{
+    await batch.commit();
+    Object.keys(currentMap).forEach(id=>{ lastSyncedSnapshot[id] = currentMap[id].json; });
+    Object.keys(lastSyncedSnapshot).forEach(id=>{ if(!(id in currentMap)) delete lastSyncedSnapshot[id]; });
   }catch(e){
     console.error('클라우드 업로드 실패', e);
-    suppressNextSnapshot = false;
   }
 }
 
@@ -3626,7 +3670,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 12:20 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 17:22 KST</span>
   </div></div>`;
 
   return html;
