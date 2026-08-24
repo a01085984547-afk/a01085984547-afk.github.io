@@ -2780,6 +2780,19 @@ function toggleEggGroup(matingId){
   else expandedEggGroups.add(matingId);
   renderMainOnly();
 }
+/* 그 페어의 아직 안 부화한 유정란들 중, 가장 빠른 부화 예정일을 찾는다(정렬용) */
+function nextHatchPredictionForGroup(cs){
+  let earliest = null;
+  cs.forEach(c=>{
+    [['egg1Status','A'],['egg2Status','B']].forEach(([field,label])=>{
+      if(c[field]!=='유정') return;
+      if(hatchlingForEgg(c.id,label)) return;
+      const pred = predictHatchDates(c.layDate, c.incubationTemp||DEFAULT_INCUBATION_TEMP);
+      if(pred && pred.avgDate && (!earliest || pred.avgDate<earliest)) earliest = pred.avgDate;
+    });
+  });
+  return earliest;
+}
 function setEggGroupSort(v){ eggGroupSort = v; renderMainOnly(); }
 let showEndedEggGroups = false;
 function toggleShowEndedEggGroups(){ showEndedEggGroups = !showEndedEggGroups; renderMainOnly(); }
@@ -2838,8 +2851,16 @@ function renderEggTab(){
   }
 
   groups.sort((a,b)=>{
-    const av=(a.activity?a.activity.date:'')||'', bv=(b.activity?b.activity.date:'')||'';
-    return eggGroupSort==='recent' ? bv.localeCompare(av) : av.localeCompare(bv);
+    if(eggGroupSort==='recent' || eggGroupSort==='old'){
+      const av=(a.activity?a.activity.date:'')||'', bv=(b.activity?b.activity.date:'')||'';
+      return eggGroupSort==='recent' ? bv.localeCompare(av) : av.localeCompare(bv);
+    }
+    // 부화 예정일 가까운순/많이 남은순: 예정일 없는 페어는 항상 맨 뒤로
+    const ad = nextHatchPredictionForGroup(a.clutches), bd = nextHatchPredictionForGroup(b.clutches);
+    if(!ad && !bd) return 0;
+    if(!ad) return 1;
+    if(!bd) return -1;
+    return eggGroupSort==='hatch_soon' ? ad.localeCompare(bd) : bd.localeCompare(ad);
   });
 
   html += `<div class="section-head" style="margin-top:18px;">
@@ -2847,6 +2868,8 @@ function renderEggTab(){
     <select onchange="setEggGroupSort(this.value)" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:12.5px;background:var(--surface);color:var(--ink-soft);">
       <option value="recent" ${eggGroupSort==='recent'?'selected':''}>메이팅 최신순</option>
       <option value="old" ${eggGroupSort==='old'?'selected':''}>메이팅 오래된순</option>
+      <option value="hatch_soon" ${eggGroupSort==='hatch_soon'?'selected':''}>부화 예정일 가까운순</option>
+      <option value="hatch_far" ${eggGroupSort==='hatch_far'?'selected':''}>부화 예정일 많이 남은순</option>
     </select>
   </div>`;
   if(endedCount>0){
@@ -3670,7 +3693,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 17:22 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-25 08:51 KST</span>
   </div></div>`;
 
   return html;
