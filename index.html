@@ -627,6 +627,19 @@ function migrateBackfillBreedingProven(st){
   });
   return changed;
 }
+/* 진행 중인 메이팅이 하나도 없는 개체는 브리딩 여부를 아니오로 정리한다(프루븐은 안 건드림).
+   '산란 종료' 상태 변경이 이 마이그레이션이 생기기 전에 있었던 경우도 정확히 맞춰준다. */
+function migrateResetBreedingForEndedMatings(st){
+  let changed = false;
+  (st.individuals||[]).forEach(i=>{
+    const stillActive = (st.matings||[]).some(m=>(m.sireId===i.id||m.damId===i.id) && normalizeMatingStatus(m.status)==='진행 중');
+    if(!stillActive && i.breeding && i.breeding!=='아니오'){
+      i.breeding = '아니오';
+      changed = true;
+    }
+  });
+  return changed;
+}
 /* ---------------- storage ---------------- */
 /* 저장소: Claude 아티팩트 환경(window.storage)에서 열었을 때는 그걸 쓰고,
    폰에 설치해서 독립 실행할 때는 브라우저 localStorage로 자동 전환된다. */
@@ -665,7 +678,8 @@ async function loadState(){
   const migratedSaleLabel = migrateSaleStatusLabel(state);
   const migratedMain = migrateMainToMainSub(state);
   const migratedBreeding = migrateBackfillBreedingProven(state);
-  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding){ await saveState(); }
+  const migratedBreedingReset = migrateResetBreedingForEndedMatings(state);
+  if(fromSeed || migratedMorphs || migratedIds || migratedSaleLabel || migratedMain || migratedBreeding || migratedBreedingReset){ await saveState(); }
 }
 async function saveState(){
   await storageSet(STORAGE_KEY, JSON.stringify(state));
@@ -746,10 +760,31 @@ function normalizeMatingStatus(status){
   if(status==='산란 종료' || status==='완료' || status==='중단') return '산란 종료';
   return '진행 중'; // '진행 중', '수컷 교체 예정' 등은 모두 진행 중으로 취급
 }
+function hasAnyActiveMating(individualId){
+  return state.matings.some(m => (m.sireId===individualId || m.damId===individualId) && normalizeMatingStatus(m.status)==='진행 중');
+}
+/* 산란(메이팅)이 끝나면 - 다른 진행 중인 메이팅이 더 없는 한 - 브리딩 여부는 다시 아니오로 리셋한다.
+   프루븐 여부는 한번 예가 되면 영구히 유지(여기서 손대지 않음). */
+function resetBreedingIfNoActiveMating(individual){
+  if(!individual) return false;
+  if(hasAnyActiveMating(individual.id)) return false;
+  if(individual.breeding==='아니오') return false;
+  individual.breeding = '아니오';
+  return true;
+}
 async function toggleMatingStatus(matingId){
   const m = state.matings.find(x=>x.id===matingId);
   if(!m) return;
-  m.status = normalizeMatingStatus(m.status)==='진행 중' ? '산란 종료' : '진행 중';
+  const wasActive = normalizeMatingStatus(m.status)==='진행 중';
+  m.status = wasActive ? '산란 종료' : '진행 중';
+  if(wasActive){
+    resetBreedingIfNoActiveMating(state.individuals.find(i=>i.id===m.sireId));
+    resetBreedingIfNoActiveMating(state.individuals.find(i=>i.id===m.damId));
+  } else {
+    // 다시 '진행 중'으로 되돌리면(되돌리기), 새 시즌이 시작된 셈이니 보류로
+    bumpBreedingLevel(state.individuals.find(i=>i.id===m.sireId), 1);
+    bumpBreedingLevel(state.individuals.find(i=>i.id===m.damId), 1);
+  }
   await persistAndRender();
 }
 
@@ -2591,7 +2626,16 @@ async function saveMating(id){
   obj.incubationTemp = parseFloat(obj.incubationTemp) || DEFAULT_INCUBATION_TEMP;
   if(id){
     const item = state.matings.find(m=>m.id===id);
+    const wasActive = normalizeMatingStatus(item.status)==='진행 중';
+    const willBeActive = normalizeMatingStatus(obj.status)==='진행 중';
     Object.assign(item, obj);
+    if(wasActive && !willBeActive){
+      resetBreedingIfNoActiveMating(state.individuals.find(i=>i.id===item.sireId));
+      resetBreedingIfNoActiveMating(state.individuals.find(i=>i.id===item.damId));
+    } else if(!wasActive && willBeActive){
+      bumpBreedingLevel(state.individuals.find(i=>i.id===item.sireId), 1);
+      bumpBreedingLevel(state.individuals.find(i=>i.id===item.damId), 1);
+    }
   } else {
     const matingDate = obj.firstMatingDate || '';
     const cohabitDate = obj.firstCohabitDate || '';
@@ -3418,6 +3462,7 @@ let syncStatus = 'local'; // 'local' | 'connecting' | 'synced' | 'error'
 let firestoreDb = null;
 let suppressNextSnapshot = false;
 let firstSnapshotResolved = null; // resolve fn for the init-time wait
+let lastKnownRemoteUpdatedAt = 0; // 마지막으로 받아본 클라우드 데이터의 타임스탬프
 
 function getFirebaseConfig(){
   try{
@@ -3484,6 +3529,7 @@ function initSync(){
           if(remote && remote.json){
             try{
               state = JSON.parse(remote.json);
+              lastKnownRemoteUpdatedAt = remote.updatedAt || Date.now();
               syncStatus = 'synced';
             }catch(e){ /* ignore parse error */ }
           }
@@ -3510,10 +3556,28 @@ function initSync(){
 
 async function pushStateToCloud(){
   if(!firestoreDb) return;
+  const docRef = firestoreDb.collection(SYNC_DOC_PATH[0]).doc(SYNC_DOC_PATH[1]);
   try{
+    /* 밀어넣기 전에 클라우드에 내가 아직 못 받아본 더 최신 변경이 있는지 먼저 확인한다.
+       (다른 기기가 방금 막 저장한 걸 모른 채 내 걸로 덮어쓰면, 그 사람 수정이 조용히 사라져버림 -
+       그래서 그런 경우엔 무작정 덮지 않고 최신 내용을 먼저 받아온 뒤 사용자에게 알린다) */
+    const snap = await docRef.get();
+    if(snap.exists){
+      const remote = snap.data();
+      if(remote && remote.updatedAt && remote.updatedAt > lastKnownRemoteUpdatedAt){
+        lastKnownRemoteUpdatedAt = remote.updatedAt;
+        if(remote.json){
+          try{ state = JSON.parse(remote.json); }catch(e){}
+        }
+        render();
+        alert('다른 기기에서 방금 저장한 내용이 있어서 그 내용을 먼저 불러왔어요. 방금 하신 수정이 반영 안 됐다면 다시 한 번 해주세요.');
+        return;
+      }
+    }
     suppressNextSnapshot = true;
-    await firestoreDb.collection(SYNC_DOC_PATH[0]).doc(SYNC_DOC_PATH[1])
-      .set({ json: JSON.stringify(state), updatedAt: Date.now() });
+    const now = Date.now();
+    await docRef.set({ json: JSON.stringify(state), updatedAt: now });
+    lastKnownRemoteUpdatedAt = now;
   }catch(e){
     console.error('클라우드 업로드 실패', e);
     suppressNextSnapshot = false;
@@ -3562,7 +3626,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 11:57 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-24 12:20 KST</span>
   </div></div>`;
 
   return html;
