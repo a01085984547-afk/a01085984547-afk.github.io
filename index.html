@@ -1266,22 +1266,31 @@ function renderDashboard(){
   const heldCount = ind.filter(i=>i.status==='보유').length;
   const breedingCount = ind.filter(i=>i.breeding==='예').length;
   const activeMatings = state.matings.filter(m=>normalizeMatingStatus(m.status)==='진행 중');
-  const openClutches = state.clutches.filter(c=>!c.actualHatchCount);
+  /* '부화 대기'는 유정란 중 아직 해칭 기록이 안 된 것만 - 무정란은 애초에 부화할 게 없으니 제외 */
+  let openEggCount = 0;
+  const openFertileClutches = [];
+  state.clutches.forEach(c=>{
+    const pendingA = c.egg1Status==='유정' && !hatchlingForEgg(c.id,'A');
+    const pendingB = c.egg2Status==='유정' && !hatchlingForEgg(c.id,'B');
+    if(pendingA) openEggCount++;
+    if(pendingB) openEggCount++;
+    if(pendingA || pendingB) openFertileClutches.push(c);
+  });
 
   let html = `
     <div class="stat-grid">
       <div class="stat-card"><div class="num">${heldCount}</div><div class="lbl">보유 개체</div></div>
       <div class="stat-card"><div class="num">${breedingCount}</div><div class="lbl">브리딩 개체</div></div>
       <div class="stat-card"><div class="num">${activeMatings.length}</div><div class="lbl">진행 중 메이팅</div></div>
-      <div class="stat-card"><div class="num">${openClutches.length}</div><div class="lbl">부화 대기 알</div></div>
+      <div class="stat-card"><div class="num">${openEggCount}</div><div class="lbl">부화 대기 알</div></div>
     </div>
   `;
 
-  // 다가오는 일정: 산란예정 1주일 이내 메이팅 + 부화예정 1주일 이내 알 (지난 것도 포함해서 놓친 거 챙기기)
+  // 다가오는 일정: 산란예정 1주일 이내 메이팅 + 부화예정 1주일 이내 알 (±7일 범위 - 너무 지난 건 안 보이게)
   const alerts = [];
   activeMatings.forEach(m=>{
     const dday = matingDdayInfo(m);
-    if(dday.mode==='predicted' && dday.diff<=7){
+    if(dday.mode==='predicted' && dday.diff<=7 && dday.diff>=-7){
       alerts.push({
         type:'mating', diff:dday.diff, date:dday.date,
         title:`${m.damName} × ${m.sireName}`,
@@ -1289,11 +1298,11 @@ function renderDashboard(){
       });
     }
   });
-  openClutches.forEach(c=>{
+  openFertileClutches.forEach(c=>{
     const pred = predictHatchDates(c.layDate, c.incubationTemp||DEFAULT_INCUBATION_TEMP);
     if(pred.avgDate){
       const diff = daysBetween(todayISO(), pred.avgDate);
-      if(diff<=7){
+      if(diff<=7 && diff>=-7){
         alerts.push({
           type:'egg', diff, date:pred.avgDate,
           title:`${c.damName} × ${c.sireName}`,
@@ -3480,6 +3489,7 @@ async function confirmPromote(hatchId){
 
 const FIREBASE_CONFIG_KEY = 'hotchoco_firebase_config_v1';
 const RECORDS_COLLECTION = 'hotchoco_records';
+const OLD_SYNC_DOC_PATH = ['hotchoco_shared', 'state']; // 예전(문서 하나짜리) 동기화 방식 - 마이그레이션 확인용으로만 참조
 const KIND_TO_LIST = { individual:'individuals', mating:'matings', clutch:'clutches', hatchling:'hatchlings' };
 
 let syncStatus = 'local'; // 'local' | 'connecting' | 'synced' | 'error'
@@ -3548,7 +3558,28 @@ function initSync(){
 
       const snap = await colRef.get();
       if(snap.empty){
+        /* 새 방식(문서 여러 개) 컬렉션이 비어있다 - 아직 이 컬렉션으로 넘어온 적이 없다는 뜻.
+           이 상태에서 지금 이 기기의 로컬 데이터를 그냥 밀어넣으면, 이 기기가 방금 켜졌거나
+           오래돼서 로컬 데이터가 낡은 경우 그 낡은 내용으로 다른 기기 데이터를 덮어써버리는
+           심각한 사고가 날 수 있다 - 그래서 먼저 예전 방식(문서 하나짜리) 클라우드 데이터가
+           남아있는지 확인해서, 있으면 그걸 우선 기준으로 삼는다. */
+        let migratedFromOldDoc = false;
+        try{
+          const oldDocRef = firestoreDb.collection(OLD_SYNC_DOC_PATH[0]).doc(OLD_SYNC_DOC_PATH[1]);
+          const oldSnap = await oldDocRef.get();
+          if(oldSnap.exists){
+            const oldData = oldSnap.data();
+            if(oldData && oldData.json){
+              const oldState = JSON.parse(oldData.json);
+              if(oldState && (oldState.individuals||[]).length + (oldState.matings||[]).length + (oldState.clutches||[]).length + (oldState.hatchlings||[]).length > 0){
+                state = oldState;
+                migratedFromOldDoc = true;
+              }
+            }
+          }
+        }catch(e){ console.error('예전 동기화 데이터 확인 실패', e); }
         await pushAllEntitiesToCloud();
+        if(migratedFromOldDoc){ render(); }
       } else {
         const newState = { individuals:[], matings:[], clutches:[], hatchlings:[] };
         lastSyncedSnapshot = {};
@@ -3661,6 +3692,56 @@ function syncStatusText(){
   }[syncStatus] || '이 기기에만 저장 중';
 }
 
+/* ---------------- 긴급 복구: 예전(문서 하나짜리) 동기화 데이터 확인/복원 ---------------- */
+async function checkOldSyncDoc(){
+  if(!firestoreDb){
+    alert('동기화가 연결되어 있지 않아요. 먼저 동기화를 켜주세요.');
+    return;
+  }
+  try{
+    const oldDocRef = firestoreDb.collection(OLD_SYNC_DOC_PATH[0]).doc(OLD_SYNC_DOC_PATH[1]);
+    const oldSnap = await oldDocRef.get();
+    if(!oldSnap.exists){
+      alert('예전 방식 데이터를 찾을 수 없어요.');
+      return;
+    }
+    const oldData = oldSnap.data();
+    if(!oldData || !oldData.json){
+      alert('예전 방식 문서는 있는데 안에 데이터가 없어요.');
+      return;
+    }
+    const oldState = JSON.parse(oldData.json);
+    const counts = {
+      individuals: (oldState.individuals||[]).length,
+      matings: (oldState.matings||[]).length,
+      clutches: (oldState.clutches||[]).length,
+      hatchlings: (oldState.hatchlings||[]).length
+    };
+    const currentCounts = {
+      individuals: state.individuals.length,
+      matings: state.matings.length,
+      clutches: state.clutches.length,
+      hatchlings: state.hatchlings.length
+    };
+    const updatedAtStr = oldData.updatedAt ? new Date(oldData.updatedAt).toLocaleString('ko-KR') : '알 수 없음';
+    const msg = `예전 클라우드 데이터 (마지막 저장: ${updatedAtStr})\n\n`+
+      `개체 ${counts.individuals}마리 · 메이팅 ${counts.matings}건 · 알 ${counts.clutches}건 · 해칭개체 ${counts.hatchlings}마리\n\n`+
+      `(지금 이 화면에 보이는 값: 개체 ${currentCounts.individuals} · 메이팅 ${currentCounts.matings} · 알 ${currentCounts.clutches} · 해칭개체 ${currentCounts.hatchlings})\n\n`+
+      `이 예전 데이터로 지금 상태를 덮어쓸까요? (지금 화면 내용은 사라지고 이걸로 교체돼요)`;
+    if(confirm(msg)){
+      state = oldState;
+      lastSyncedSnapshot = {};
+      await pushAllEntitiesToCloud();
+      await storageSet(STORAGE_KEY, JSON.stringify(state));
+      render();
+      alert('복원했어요. 개체·메이팅·알·해칭개체 목록에서 확인해보세요.');
+    }
+  }catch(e){
+    console.error(e);
+    alert('확인 중 오류가 발생했어요: '+e.message);
+  }
+}
+
 function renderSettingsTab(){
   const cfg = getFirebaseConfig();
   let html = `<div class="section-head"><h2>설정</h2></div>`;
@@ -3671,6 +3752,7 @@ function renderSettingsTab(){
 
   if(cfg){
     html += `<button class="btn btn-ghost btn-block" style="margin-top:12px;" onclick="openSyncSetupForm()">동기화 설정 다시 보기</button>`;
+    html += `<button class="btn btn-ghost btn-block" style="margin-top:8px;background:#FFF3CD;" onclick="checkOldSyncDoc()">⚠️ 예전 동기화 데이터 확인/복원</button>`;
     html += `<button class="btn btn-danger btn-block" style="margin-top:8px;" onclick="disableSync()">동기화 끄기(이 기기 분리)</button>`;
   } else {
     html += `<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="openSyncSetupForm()">동기화 설정하기</button>`;
@@ -3693,7 +3775,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-25 08:51 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-26 16:47 KST</span>
   </div></div>`;
 
   return html;
