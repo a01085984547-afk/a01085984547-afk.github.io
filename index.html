@@ -989,13 +989,15 @@ const INDIVIDUAL_SORTERS = {
 /* ---------------- 해칭개체 정렬/필터 ---------------- */
 let hatchlingSort = 'age_desc';
 let hatchlingMorphFilter = '';
+const GENDER_SORT_RANK = { '수컷':0, '암컷':1, '미구분':2 };
 const HATCHLING_SORTERS = {
   age_desc: (a,b)=>(b.hatchDate||'').localeCompare(a.hatchDate||''),
   age_asc:  (a,b)=>(a.hatchDate||'').localeCompare(b.hatchDate||''),
   price_desc: (a,b)=>(parseFloat(b.price)||0)-(parseFloat(a.price)||0),
   price_asc:  (a,b)=>(parseFloat(a.price)||0)-(parseFloat(b.price)||0),
   id_desc: (a,b)=>(b.id||'').localeCompare(a.id||''),
-  id_asc:  (a,b)=>(a.id||'').localeCompare(b.id||'')
+  id_asc:  (a,b)=>(a.id||'').localeCompare(b.id||''),
+  gender: (a,b)=>(GENDER_SORT_RANK[a.gender]??3)-(GENDER_SORT_RANK[b.gender]??3) || (b.hatchDate||'').localeCompare(a.hatchDate||'')
 };
 /* =====================================================================
    혈통(근친) 체크 엔진
@@ -1337,8 +1339,10 @@ function renderDashboard(){
 function setIndividualSort(v){ individualSort = v; updateIndividualListBody(); }
 let individualMorphFilter = '';
 let individualHetFilter = '';
+let individualGenderFilter = '';
 function setIndividualMorphFilter(v){ individualMorphFilter = v; updateIndividualListBody(); }
 function setIndividualHetFilter(v){ individualHetFilter = v; updateIndividualListBody(); }
+function setIndividualGenderFilter(v){ individualGenderFilter = v; updateIndividualListBody(); }
 function setIndividualFilter(v){ listFilters.individual = v; updateIndividualListBody(); }
 
 function getFilteredIndividuals(){
@@ -1352,6 +1356,9 @@ function getFilteredIndividuals(){
   }
   if(individualHetFilter){
     items = items.filter(i=>individualHetFilter==='__none__' ? !i.morphHet : i.morphHet===individualHetFilter);
+  }
+  if(individualGenderFilter){
+    items = items.filter(i=>i.gender===individualGenderFilter);
   }
   return items;
 }
@@ -1431,9 +1438,11 @@ function renderIndividualList(){
   const items = getFilteredIndividuals();
   const morphCounts = {};
   const hetCounts = {};
+  const genderCounts = {};
   state.individuals.forEach(i=>{
     if(i.morph) morphCounts[i.morph] = (morphCounts[i.morph]||0)+1;
     if(i.morphHet) hetCounts[i.morphHet] = (hetCounts[i.morphHet]||0)+1;
+    if(i.gender) genderCounts[i.gender] = (genderCounts[i.gender]||0)+1;
   });
   const morphList = Object.keys(morphCounts).sort((a,b)=>morphCounts[b]-morphCounts[a]);
   const hetList = HET_OPTIONS.filter(h=>h!=='없음');
@@ -1456,15 +1465,21 @@ function renderIndividualList(){
       <select onchange="setIndividualSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===individualSort?'selected':''}>${o.l}</option>`).join('')}
       </select>
+      <select onchange="setIndividualMorphFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">모프 전체 보기</option>
+        ${morphList.map(m=>`<option value="${esc(m)}" ${m===individualMorphFilter?'selected':''}>${esc(m)} (${morphCounts[m]}마리)</option>`).join('')}
+      </select>
+    </div>
+    <div class="searchbar">
       <select onchange="setIndividualHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         <option value="">헷 여부</option>
         ${hetList.map(h=>`<option value="${esc(h)}" ${h===individualHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
       </select>
-    </div>
-    <div class="searchbar">
-      <select onchange="setIndividualMorphFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
-        <option value="">모프 전체 보기</option>
-        ${morphList.map(m=>`<option value="${esc(m)}" ${m===individualMorphFilter?'selected':''}>${esc(m)} (${morphCounts[m]}마리)</option>`).join('')}
+      <select onchange="setIndividualGenderFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">성별 전체보기</option>
+        <option value="수컷" ${individualGenderFilter==='수컷'?'selected':''}>수컷 (${genderCounts['수컷']||0}마리)</option>
+        <option value="암컷" ${individualGenderFilter==='암컷'?'selected':''}>암컷 (${genderCounts['암컷']||0}마리)</option>
+        <option value="미구분" ${individualGenderFilter==='미구분'?'selected':''}>미구분 (${genderCounts['미구분']||0}마리)</option>
       </select>
     </div>
     <div id="individual-list-body">${renderIndividualListBody(items)}</div>`;
@@ -1475,6 +1490,8 @@ function setHatchlingSort(v){ hatchlingSort = v; updateHatchlingListBody(); }
 function setHatchlingMorphFilter(v){ hatchlingMorphFilter = v; updateHatchlingListBody(); }
 let hatchlingHetFilter = '';
 function setHatchlingHetFilter(v){ hatchlingHetFilter = v; updateHatchlingListBody(); }
+let hatchlingGenderFilter = '';
+function setHatchlingGenderFilter(v){ hatchlingGenderFilter = v; updateHatchlingListBody(); }
 let hatchlingStatusFilter = '';
 function setHatchlingFilter(v){ listFilters.hatchling = v; updateHatchlingListBody(); }
 
@@ -1489,6 +1506,9 @@ function getFilteredHatchlings(){
   }
   if(hatchlingHetFilter){
     items = items.filter(h=>hatchlingHetFilter==='__none__' ? !h.morphHet : h.morphHet===hatchlingHetFilter);
+  }
+  if(hatchlingGenderFilter){
+    items = items.filter(h=>h.gender===hatchlingGenderFilter);
   }
   if(hatchlingStatusFilter){
     items = items.filter(h=>h.status===hatchlingStatusFilter);
@@ -1560,10 +1580,12 @@ function renderHatchlingList(){
   const morphCounts = {};
   const hetCounts = {};
   const statusCounts = {};
+  const genderCounts = {};
   state.hatchlings.forEach(h=>{
     if(h.morph) morphCounts[h.morph] = (morphCounts[h.morph]||0)+1;
     if(h.morphHet) hetCounts[h.morphHet] = (hetCounts[h.morphHet]||0)+1;
     if(h.status) statusCounts[h.status] = (statusCounts[h.status]||0)+1;
+    if(h.gender) genderCounts[h.gender] = (genderCounts[h.gender]||0)+1;
   });
   const morphList = Object.keys(morphCounts).sort((a,b)=>morphCounts[b]-morphCounts[a]);
   const hetList = HET_OPTIONS.filter(h=>h!=='없음');
@@ -1574,7 +1596,8 @@ function renderHatchlingList(){
     {v:'price_desc',l:'가격 높은순'},
     {v:'price_asc',l:'가격 낮은순'},
     {v:'id_desc',l:'고유번호 내림차순'},
-    {v:'id_asc',l:'고유번호 오름차순'}
+    {v:'id_asc',l:'고유번호 오름차순'},
+    {v:'gender',l:'성별순'}
   ];
   return `<div class="section-head"><h2>해칭개체</h2><span class="count" id="hatchling-count">${items.length} / ${state.hatchlings.length}마리</span></div>
     <div class="searchbar">
@@ -1586,16 +1609,24 @@ function renderHatchlingList(){
       <select onchange="setHatchlingSort(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         ${sortOptions.map(o=>`<option value="${o.v}" ${o.v===hatchlingSort?'selected':''}>${o.l}</option>`).join('')}
       </select>
-      <select onchange="setHatchlingHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
-        <option value="">헷 여부</option>
-        ${hetList.map(h=>`<option value="${esc(h)}" ${h===hatchlingHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
-      </select>
-    </div>
-    <div class="searchbar">
       <select onchange="setHatchlingMorphFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         <option value="">모프 전체 보기</option>
         ${morphList.map(m=>`<option value="${esc(m)}" ${m===hatchlingMorphFilter?'selected':''}>${esc(m)} (${morphCounts[m]}마리)</option>`).join('')}
       </select>
+    </div>
+    <div class="searchbar">
+      <select onchange="setHatchlingHetFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">헷 여부</option>
+        ${hetList.map(h=>`<option value="${esc(h)}" ${h===hatchlingHetFilter?'selected':''}>${esc(h)}${hetCounts[h]?' ('+hetCounts[h]+'마리)':''}</option>`).join('')}
+      </select>
+      <select onchange="setHatchlingGenderFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+        <option value="">성별 전체보기</option>
+        <option value="수컷" ${hatchlingGenderFilter==='수컷'?'selected':''}>수컷 (${genderCounts['수컷']||0}마리)</option>
+        <option value="암컷" ${hatchlingGenderFilter==='암컷'?'selected':''}>암컷 (${genderCounts['암컷']||0}마리)</option>
+        <option value="미구분" ${hatchlingGenderFilter==='미구분'?'selected':''}>미구분 (${genderCounts['미구분']||0}마리)</option>
+      </select>
+    </div>
+    <div class="searchbar">
       <select onchange="setHatchlingStatusFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
         <option value="">상태 전체 보기</option>
         ${statusList.map(s=>`<option value="${esc(s)}" ${s===hatchlingStatusFilter?'selected':''}>${esc(s)}${statusCounts[s]?' ('+statusCounts[s]+'마리)':''}</option>`).join('')}
@@ -3775,7 +3806,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-26 16:47 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-26 23:35 KST</span>
   </div></div>`;
 
   return html;
