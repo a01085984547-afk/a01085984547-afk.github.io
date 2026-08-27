@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+<!-- BUILD_VERSION: 2026-08-27 11:14 KST -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>HotChocoCre</title>
@@ -3806,7 +3807,7 @@ function renderSettingsTab(){
   <div class="card"><div class="card-sub" style="line-height:1.8;">
     HotChocoCre 크레스티드 매니저<br>
     개체 · 메이팅 · 산란/알 · 해칭개체 · 혈통(근친) 관리<br>
-    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: 2026-08-26 23:35 KST</span>
+    <span style="color:var(--ink-faint);font-size:11.5px;">빌드: ${APP_BUILD_VERSION}</span>
   </div></div>`;
 
   return html;
@@ -3878,7 +3879,7 @@ async function exportExcelBackup(){
       '모이름': i.damName||'', '모모프': i.damMorph||'', '모헷': i.damHet||'',
       '최근무정란산란일(혼자낳음)': i.lastSoloInfertileLayDate||'',
       '최근체중(g)': (latestWeightEntry(i)||{}).grams||'', '최근체중측정일': (latestWeightEntry(i)||{}).date||'',
-      '킵여부': i.keep||'', '브리딩여부': i.breeding||'', '메인여부': i.main||'', '현재상태': i.status||'',
+      '킵여부': i.keep||'', '브리딩여부': i.breeding||'', '프루븐여부': i.provenStatus||'아니오', '메인서브여부': i.main||'', '현재상태': i.status||'',
       '분양플랫폼': i.salePlatform||'', '분양일': i.saleDate||'', '분양가': i.salePrice||'',
       '메모': i.memo||''
     }));
@@ -3887,6 +3888,8 @@ async function exportExcelBackup(){
     const matRows = state.matings.map(m=>({
       '메이팅ID': m.id, '암컷이름': m.damName||'', '암컷ID': m.damId||'', '수컷이름': m.sireName||'', '수컷ID': m.sireId||'',
       '최근메이팅일': latestMatingDate(m)||'', '상태': normalizeMatingStatus(m.status),
+      '메이팅기록': (m.matingLog||[]).join(', '),
+      '합사이력': (m.cohabitLog||[]).map(c=>`${c.startDate}~${c.endDate||'진행중'}`).join(' / '),
       '산란주기(일)': m.cycleDays||'', '기본인큐온도': m.incubationTemp||'', '산란종료일': m.seasonEndDate||''
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matRows), '메이팅관리');
@@ -3905,7 +3908,7 @@ async function exportExcelBackup(){
       '확정모프': h.morph||'', '헷': h.morphHet||'', '패턴': (h.morphPatterns||[]).join(', '), '컬러': (h.morphColors||[]).join(', '),
       '성별': h.gender||'', '점여부': h.dotStatus||'',
       '최근체중(g)': (latestWeightEntry(h)||{}).grams||'', '최근체중측정일': (latestWeightEntry(h)||{}).date||'',
-      '킵': h.keep||'', '브리딩': h.breeding||'', '메인': h.main||'', '상태': h.status||'',
+      '킵': h.keep||'', '브리딩': h.breeding||'', '메인서브': h.main||'', '상태': h.status||'',
       '분양플랫폼': h.salePlatform||'', '분양일': h.saleDate||'', '분양가': h.price||'',
       '개체등록여부': h.promotedToId ? ('등록됨('+h.promotedToId+')') : '',
       '메모': h.note||''
@@ -4087,6 +4090,29 @@ function renderSoldTab(){
 /* =====================================================================
    초기화
 ===================================================================== */
+/* ---------------- 새 버전 확인(캐시 우회) ---------------- */
+const APP_BUILD_VERSION = '2026-08-27 11:14 KST';
+async function checkForNewVersion(){
+  try{
+    const res = await fetch(location.href, { cache: 'no-store' });
+    if(!res.ok) return;
+    const text = await res.text();
+    const m = text.match(/<!--\s*BUILD_VERSION:\s*([^-]+?)\s*-->/);
+    if(m && m[1] && m[1].trim() && m[1].trim() !== APP_BUILD_VERSION){
+      showUpdateAvailableBanner();
+    }
+  }catch(e){ /* 오프라인이거나 네트워크 문제면 그냥 조용히 무시 */ }
+}
+function showUpdateAvailableBanner(){
+  if(document.getElementById('update-banner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'update-banner';
+  banner.innerHTML = `🔄 새 버전이 있어요 — 눌러서 새로고침`;
+  banner.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--pine-deep);color:#fff;padding:12px 20px;border-radius:999px;font-size:13px;font-weight:700;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.3);cursor:pointer;white-space:nowrap;';
+  banner.onclick = ()=>{ location.reload(); };
+  document.body.appendChild(banner);
+}
+
 (async function init(){
   /* 뒤로가기 안전장치는 데이터 로딩보다 먼저, 최대한 빨리 걸어둔다.
      (로딩 화면이 떠있는 그 짧은 순간에 뒤로가기를 눌러도 앱이 바로 꺼지지 않게) */
@@ -4102,6 +4128,7 @@ function renderSoldTab(){
     await initSync();
   }
   render();
+  checkForNewVersion();
 })();
 
 </script>
