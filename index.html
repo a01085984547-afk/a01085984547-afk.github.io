@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<!-- BUILD_VERSION: 2026-08-29 00:05 KST -->
+<!-- BUILD_VERSION: 2026-08-29 08:56 KST -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>HotChocoCre</title>
@@ -1080,6 +1080,11 @@ const HATCHLING_SORTERS = {
      이름만 있는 조상은 그 지점에서 멈춘다(더 위 세대는 알 수 없음).
    - 이름만 있는 조상이라도 "이름+출신업체"가 같으면 동일 개체로 간주해
      겹침을 잡아낸다.
+   - "외부 혈통 참조"(state.externalLineageRefs): 등록되지 않은/이름만 아는
+     조상에 대해 "이 개체(또는 이름만 있는 조상)가 [유명 조상]의 N세손이다"
+     라고 사용자가 직접 적어둔 참고 정보. 계보를 타고 올라가다 이 참조가
+     걸리는 개체/이름을 만나면, 그 지점부터 몇 대를 더 건너뛰어 그 유명
+     조상까지 이어준다(추정치라 estimated 표시를 남김).
 ===================================================================== */
 
 function getEntityById(compositeId){
@@ -1090,6 +1095,13 @@ function getEntityById(compositeId){
     return state.hatchlings.find(h=>h.id===id) || null;
   }
   return state.individuals.find(i=>i.id===compositeId) || null;
+}
+
+function compositeKeyForEntity(ent){
+  if(!ent || !ent.id) return null;
+  if((state.individuals||[]).some(i=>i.id===ent.id)) return 'IND:'+ent.id;
+  if((state.hatchlings||[]).some(h=>h.id===ent.id)) return 'HAT:'+ent.id;
+  return null;
 }
 
 function parentRef(entity, side){
@@ -1104,11 +1116,31 @@ function parentRef(entity, side){
   return null;
 }
 
+/* subjectKey: 등록된 개체는 'IND:id'/'HAT:id', 이름만 있는 조상은 그 이름 그대로(대소문자/공백 정리) */
+function findExternalRef(subjectKey){
+  if(!subjectKey) return null;
+  return (state.externalLineageRefs||[]).find(r=>r.subjectKey===subjectKey) || null;
+}
+function injectExternalRef(visited, subjectKey, baseGen, baseBranch, maxGen){
+  const ref = findExternalRef(subjectKey);
+  if(!ref) return;
+  const hops = parseInt(ref.generations,10) || 1;
+  const newGen = baseGen + hops;
+  if(newGen > maxGen) return;
+  const newBranch = ref.side || baseBranch || null;
+  const key = 'EXTREF:'+ref.ancestorName.trim();
+  const existing = visited.get(key);
+  if(!existing || existing.gen>newGen){
+    visited.set(key, {gen:newGen, label:ref.ancestorName, linkedId:null, branch:newBranch, estimated:true});
+  }
+}
+
 function buildAncestryMap(startEntity, maxGen){
   maxGen = maxGen || 6;
-  const visited = new Map(); // key -> {gen, label, linkedId, branch}
+  const visited = new Map(); // key -> {gen, label, linkedId, branch, estimated?}
   const queue = [{ent:startEntity, gen:0, branch:null}];
   const seenEnt = new Set();
+  injectExternalRef(visited, compositeKeyForEntity(startEntity), 0, null, maxGen);
   while(queue.length){
     const {ent, gen, branch} = queue.shift();
     if(gen>=maxGen) continue;
@@ -1123,6 +1155,20 @@ function buildAncestryMap(startEntity, maxGen){
       if(!existing || existing.gen>newGen){
         visited.set(key, {gen:newGen, label, linkedId: ref.type==='linked'?ref.id:null, branch:newBranch});
       }
+      /* 이름만 있는 조상은 "이름만으로"도 매칭될 수 있게 별도 키로 한 번 더 등록해둔다.
+         이래야 다른 계보에서 외부 혈통 참조로 같은 이름까지 이어져 온 경우와도 서로 겹침이 잡힌다. */
+      if(ref.type==='named'){
+        const nameOnlyKey = 'EXTREF:'+label.trim();
+        const existing2 = visited.get(nameOnlyKey);
+        if(!existing2 || existing2.gen>newGen){
+          visited.set(nameOnlyKey, {gen:newGen, label, linkedId:null, branch:newBranch});
+        }
+      }
+      if(ref.type==='linked'){
+        injectExternalRef(visited, 'IND:'+ref.id, newGen, newBranch, maxGen);
+      } else {
+        injectExternalRef(visited, (ent[side+'Name']||'').trim(), newGen, newBranch, maxGen);
+      }
       if(ref.type==='linked' && !seenEnt.has('ID:'+ref.id+':'+newGen)){
         const nextInd = state.individuals.find(i=>i.id===ref.id);
         if(nextInd){
@@ -1135,8 +1181,10 @@ function buildAncestryMap(startEntity, maxGen){
   return visited;
 }
 
-/* 세대수 + 부/모 쪽을 한국어 호칭으로: 1대=부/모, 2대=조부모/외조부모, 3대=증조부모/외증조부모, 4대 이상은 구체적 호칭 없이 "N대 위 조상" */
+/* 세대수 + 부/모 쪽을 한국어 호칭으로: 1대=부/모, 2대=조부모/외조부모, 3대=증조부모/외증조부모,
+   4대 이상이거나 어느 쪽인지 모르면 "N대 위 조상" */
 function kinshipLabel(gen, branch){
+  if(!branch) return `${gen}대 위 조상`;
   if(gen===1) return branch==='sire' ? '부' : '모';
   if(gen===2) return branch==='sire' ? '조부모' : '외조부모';
   if(gen===3) return branch==='sire' ? '증조부모' : '외증조부모';
@@ -1183,7 +1231,7 @@ function compareBloodline(entA, entB){
   mapA.forEach((infoA, key)=>{
     if(mapB.has(key)){
       const infoB = mapB.get(key);
-      common.push({ key, label:infoA.label, genA:infoA.gen, genB:infoB.gen, branchA:infoA.branch, branchB:infoB.branch });
+      common.push({ key, label:infoA.label, genA:infoA.gen, genB:infoB.gen, branchA:infoA.branch, branchB:infoB.branch, estimated: !!(infoA.estimated||infoB.estimated) });
     }
   });
 
@@ -1237,9 +1285,13 @@ function renderBloodlineBanner(entA, entB){
     <b>${levelIcon(r.level)} [${levelLabel(r.level)}] ${esc(r.title)}</b>
     ${esc(r.detail)}`;
   if(r.common && r.common.length){
+    const anyEstimated = r.common.some(c=>c.estimated);
     html += `<ul>` + r.common.slice(0,5).map(c=>
-      `<li>공통 조상: <b>${esc(c.label)}</b> (${esc(entA.name||entA.morph||'A')}쪽 ${esc(kinshipLabel(c.genA,c.branchA))} / ${esc(entB.name||entB.morph||'B')}쪽 ${esc(kinshipLabel(c.genB,c.branchB))})</li>`
+      `<li>공통 조상: <b>${esc(c.label)}</b>${c.estimated?' <span class="ped-tag">추정</span>':''} (${esc(entA.name||entA.morph||'A')}쪽 ${esc(kinshipLabel(c.genA,c.branchA))} / ${esc(entB.name||entB.morph||'B')}쪽 ${esc(kinshipLabel(c.genB,c.branchB))})</li>`
     ).join('') + `</ul>`;
+    if(anyEstimated){
+      html += `<div style="font-size:11.5px;opacity:.85;margin-top:2px;">"추정" 표시는 직접 입력해두신 외부 혈통 참조를 근거로 한 추정치예요. 정확한 판단을 위해 분양처 혈통서도 함께 확인해주세요.</div>`;
+    }
   }
   html += `</div>`;
   return html;
@@ -3319,6 +3371,67 @@ function setPedigreeSel(side, value){
   renderMainOnly();
 }
 
+/* ---------------- 외부 혈통 참조 (등록 안 된/이름만 아는 조상 연결) ---------------- */
+function resolveLineageSubjectKey(name){
+  const trimmed = (name||'').trim();
+  if(!trimmed) return null;
+  const ind = state.individuals.find(i=>(i.name||'').trim()===trimmed);
+  if(ind) return 'IND:'+ind.id;
+  return trimmed; // 등록된 개체가 아니면 이름 자체를 키로 사용(이름만 아는 조상)
+}
+function renderExternalLineageRefList(){
+  const refs = state.externalLineageRefs||[];
+  if(refs.length===0) return `<div class="readonly-note">아직 등록된 외부 혈통 참조가 없어요.</div>`;
+  return refs.map(r=>{
+    const sideLabel = r.side==='sire' ? '부 쪽' : (r.side==='dam' ? '모 쪽' : '어느 쪽인지 모름');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-top:1px dashed var(--border);">
+      <div style="font-size:12.5px;color:var(--ink);"><b>${esc(r.subjectLabel)}</b> = <b>${esc(r.ancestorName)}</b>의 ${esc(r.generations)}세손 (${esc(sideLabel)})</div>
+      <button type="button" onclick="deleteExternalLineageRef('${r.id}')" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;padding:4px 8px;">삭제</button>
+    </div>`;
+  }).join('');
+}
+function openAddExternalLineageRefForm(){
+  const body = `
+    <form id="ext-lineage-form" onsubmit="event.preventDefault(); saveExternalLineageRef();">
+      <label class="field full"><span>대상 이름</span><input name="subjectName" required placeholder="예: 제트 또는 크리스마스"></label>
+      <div class="readonly-note" style="margin-top:-8px;">등록된 개체 이름과 정확히 같으면 그 개체에 연결되고, 아니면 '이름만 아는 조상'으로 저장돼서 나중에 그 이름이 부모로 등장하는 곳마다 자동으로 이어져요.</div>
+      <div class="form-grid">
+        <label class="field full"><span>알려진 조상 이름</span><input name="ancestorName" required placeholder="예: 짐"></label>
+        <label class="field"><span>그 조상의 몇 세손인지</span><input type="number" name="generations" min="1" value="1" required></label>
+        <label class="field"><span>어느 쪽인지(아는 경우만)</span><select name="side"><option value="">모름</option><option value="sire">부(수컷) 쪽</option><option value="dam">모(암컷) 쪽</option></select></label>
+      </div>
+      <div class="readonly-note" style="margin-top:-8px;">예) "제트는 짐의 3세손" → 대상: 제트 / 조상: 짐 / 세대: 3 / 어느쪽: 모름<br>예) "크리스마스의 부가 짐" → 대상: 크리스마스 / 조상: 짐 / 세대: 1 / 어느쪽: 부</div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">취소</button>
+        <button type="submit" class="btn btn-primary">추가</button>
+      </div>
+    </form>
+  `;
+  openModal('외부 혈통 참조 추가', body);
+}
+async function saveExternalLineageRef(){
+  const fd = new FormData(document.getElementById('ext-lineage-form'));
+  const subjectName = (fd.get('subjectName')||'').trim();
+  const ancestorName = (fd.get('ancestorName')||'').trim();
+  const generations = parseInt(fd.get('generations'),10) || 1;
+  const side = fd.get('side') || '';
+  if(!subjectName || !ancestorName) return;
+  const subjectKey = resolveLineageSubjectKey(subjectName);
+  if(!subjectKey) return;
+  if(!state.externalLineageRefs) state.externalLineageRefs = [];
+  state.externalLineageRefs.push({
+    id: 'ext'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+    subjectKey, subjectLabel: subjectName, ancestorName, generations, side
+  });
+  closeModal();
+  await persistAndRender();
+}
+async function deleteExternalLineageRef(id){
+  if(!confirm('이 외부 혈통 참조를 삭제할까요?')) return;
+  state.externalLineageRefs = (state.externalLineageRefs||[]).filter(r=>r.id!==id);
+  await persistAndRender();
+}
+
 function renderPedigreeTab(){
   let html = `<div class="section-head"><h2>혈통(근친) 검사</h2></div>
   <p style="font-size:13px;color:var(--ink-soft);line-height:1.6;margin-top:-4px;">
@@ -3344,6 +3457,13 @@ function renderPedigreeTab(){
   }
 
   html += `<div class="disclaimer">이 검사는 등록된 부모 정보(개체 ID 연결 또는 이름+출신 업체)를 근거로 한 참고용 계산입니다. 외부에서 영입한 개체의 조상 정보가 시스템에 없으면 그 위 세대는 확인할 수 없어요. 정확한 판단을 위해 분양처의 혈통서도 함께 확인해주세요.</div>`;
+
+  html += collapsibleSection('extLineageRefs', '외부 혈통 참조 추가 (등록 안 된 조상 연결하기)', `
+    <p style="font-size:12.5px;color:var(--ink-soft);line-height:1.6;margin:0 0 10px;">부모 정보가 없어서 계보가 끊기는 개체라도, "이 개체(또는 이름만 아는 조상)가 [유명 조상]의 몇 세손이다"라는 걸 알고 있으면 여기 적어두세요. 위 검사에 자동으로 반영돼요(단, 추정치예요).</p>
+    <button type="button" class="btn btn-ghost btn-block" style="margin-bottom:4px;" onclick="openAddExternalLineageRefForm()">+ 외부 혈통 참조 추가</button>
+    ${renderExternalLineageRefList()}
+  `, false);
+
   return html;
 }
 
@@ -4326,7 +4446,7 @@ function renderSoldTab(){
    초기화
 ===================================================================== */
 /* ---------------- 새 버전 확인(캐시 우회) ---------------- */
-const APP_BUILD_VERSION = '2026-08-29 00:05 KST';
+const APP_BUILD_VERSION = '2026-08-29 08:56 KST';
 async function checkForNewVersion(){
   try{
     const res = await fetch(location.href, { cache: 'no-store' });
