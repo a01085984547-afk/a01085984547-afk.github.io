@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<!-- BUILD_VERSION: 2026-08-28 11:08 KST -->
+<!-- BUILD_VERSION: 2026-08-28 12:42 KST -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>HotChocoCre</title>
@@ -3968,6 +3968,8 @@ const SOLD_SORTERS = {
   price_asc:  (a,b)=>(parseFloat(a.salePrice)||0)-(parseFloat(b.salePrice)||0)
 };
 function setSoldSort(v){ soldSort = v; renderMainOnly(); }
+let soldYearFilter = '';
+function setSoldYearFilter(v){ soldYearFilter = v; renderMainOnly(); }
 
 let soldViewMode = 'card';
 function setSoldViewMode(v){
@@ -3979,7 +3981,7 @@ function setSoldViewMode(v){
   if(compactBtn) compactBtn.classList.toggle('chip-selected', v==='compact');
 }
 
-function getSoldRecords(){
+function getAllSoldRecordsUnfiltered(){
   const list = [];
   state.individuals.forEach(i=>{
     if(i.status==='분양 완료'){
@@ -4005,6 +4007,26 @@ function getSoldRecords(){
       });
     }
   });
+  return list;
+}
+/* 실제 기록에 있는 연도 + 최소 2026년부터 올해(그리고 미래 날짜로 미리 적어둔 연도가 있으면 그것까지)를 모두 포함 */
+function getSoldYearOptions(allRecords){
+  const years = new Set();
+  years.add(2026);
+  years.add(new Date().getFullYear());
+  allRecords.forEach(r=>{
+    if(r.saleDate){
+      const y = parseInt(r.saleDate.slice(0,4), 10);
+      if(!isNaN(y)) years.add(y);
+    }
+  });
+  return Array.from(years).sort((a,b)=>a-b);
+}
+function getSoldRecords(){
+  let list = getAllSoldRecordsUnfiltered();
+  if(soldYearFilter){
+    list = list.filter(r=>r.saleDate && r.saleDate.slice(0,4)===soldYearFilter);
+  }
   list.sort(SOLD_SORTERS[soldSort] || SOLD_SORTERS.saledate_desc);
   return list;
 }
@@ -4030,8 +4052,10 @@ function renderSoldCompactRow(r){
 }
 
 function renderSoldTab(){
+  const allRecords = getAllSoldRecordsUnfiltered();
   const records = getSoldRecords();
   const totalAmount = records.reduce((sum,r)=>sum+(parseFloat(r.salePrice)||0),0);
+  const yearOptions = getSoldYearOptions(allRecords);
 
   const sortOptions = [
     {v:'saledate_desc',l:'분양일 최신순'},
@@ -4041,13 +4065,23 @@ function renderSoldTab(){
   ];
 
   let html = `<div class="section-head"><h2>분양완료</h2></div>
+  <div class="searchbar">
+    <select onchange="setSoldYearFilter(this.value)" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink-soft);">
+      <option value="" ${soldYearFilter===''?'selected':''}>전체보기</option>
+      ${yearOptions.map(y=>`<option value="${y}" ${String(y)===soldYearFilter?'selected':''}>${y}년</option>`).join('')}
+    </select>
+  </div>
   <div class="stat-grid">
-    <div class="stat-card"><div class="num">${fmtMoney(totalAmount)}</div><div class="lbl">총 누적 분양 금액</div></div>
-    <div class="stat-card"><div class="num">${records.length}</div><div class="lbl">총 분양 개체수</div></div>
+    <div class="stat-card"><div class="num">${fmtMoney(totalAmount)}</div><div class="lbl">${soldYearFilter?soldYearFilter+'년 ':'총 '}누적 분양 금액</div></div>
+    <div class="stat-card"><div class="num">${records.length}</div><div class="lbl">${soldYearFilter?soldYearFilter+'년 ':'총 '}분양 개체수</div></div>
   </div>`;
 
-  if(records.length===0){
+  if(allRecords.length===0){
     html += `<div class="empty-state"><div class="dotrow"><span></span><span></span><span></span><span></span><span></span></div><p>아직 분양 완료된 개체가 없어요.<br>개체·해칭개체 상태를 '분양 완료'로 바꾸면 여기 모여요.</p></div>`;
+    return html;
+  }
+  if(records.length===0){
+    html += `<div class="empty-state"><p>${esc(soldYearFilter)}년에 분양 완료된 개체가 없어요.</p></div>`;
     return html;
   }
 
@@ -4092,7 +4126,7 @@ function renderSoldTab(){
    초기화
 ===================================================================== */
 /* ---------------- 새 버전 확인(캐시 우회) ---------------- */
-const APP_BUILD_VERSION = '2026-08-28 11:08 KST';
+const APP_BUILD_VERSION = '2026-08-28 12:42 KST';
 async function checkForNewVersion(){
   try{
     const res = await fetch(location.href, { cache: 'no-store' });
