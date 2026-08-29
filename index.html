@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<!-- BUILD_VERSION: 2026-08-29 09:12 KST -->
+<!-- BUILD_VERSION: 2026-08-29 09:27 KST -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>HotChocoCre</title>
@@ -177,7 +177,9 @@ main{padding:16px 16px 100px;}
 
 .pc-select-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center;margin-bottom:14px;}
 .pc-select-row .vs{font-family:var(--font-display);font-weight:600;color:var(--amber);font-size:13px;text-align:center;}
-.pc-select-btn{min-width:0;text-align:left;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:var(--surface);color:var(--ink);font-size:13px;font-family:var(--font-body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
+.pc-select-btn{min-width:0;text-align:left;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--surface);color:var(--ink);font-size:13px;font-family:var(--font-body);cursor:pointer;line-height:1.4;}
+.pc-select-btn .line1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700;}
+.pc-select-btn .line2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--ink-faint);font-weight:500;margin-top:1px;}
 .tree-box{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 13px;font-size:12.5px;color:var(--ink-soft);margin-top:10px;line-height:1.7;}
 .tree-box b{color:var(--ink);}
 .disclaimer{font-size:11.5px;color:var(--ink-faint);line-height:1.6;margin-top:16px;background:var(--surface-2);border-radius:var(--radius-sm);padding:11px 13px;border:1px solid var(--border);}
@@ -3358,12 +3360,27 @@ function pickEntity(key){
   closeModal();
   renderMainOnly();
 }
+function clearPedigreeSel(side){
+  pedigreeSel[side] = '';
+  renderMainOnly();
+}
 function pedigreeEntityLabel(key){
   const ent = getEntityById(key);
-  if(!ent) return '개체 선택하기';
-  const morphLabel = formatMorphDisplayFull(ent.morph, ent.morphHet, ent.morphPatterns, ent.morphColors);
-  const name = ent.name || ent.morph || ent.id;
-  return morphLabel && ent.name ? `${name} · ${morphLabel}` : name;
+  if(!ent) return null;
+  const morphLabel = formatMorphDisplayFull(ent.morph, ent.morphHet, ent.morphPatterns, ent.morphColors) || ent.morph || '모프 미정';
+  if(ent.name){
+    // 개체(이름 있음): 1줄 이름 / 2줄 모프
+    return { primary: ent.name, secondary: morphLabel };
+  }
+  // 해칭개체(이름이 따로 없음): 1줄 고유번호 / 2줄 모프
+  return { primary: ent.id, secondary: morphLabel };
+}
+function renderPedigreeSelectBtnContent(side){
+  const key = pedigreeSel[side];
+  if(!key) return '개체 선택하기';
+  const p = pedigreeEntityLabel(key);
+  if(!p) return '개체 선택하기';
+  return `<div class="line1">${esc(p.primary)}</div><div class="line2">${esc(p.secondary)}</div>`;
 }
 
 function setPedigreeSel(side, value){
@@ -3398,7 +3415,7 @@ function openAddExternalLineageRefForm(){
       <div class="form-grid">
         <label class="field full"><span>알려진 조상 이름</span><input name="ancestorName" required placeholder="예: 짐"></label>
         <label class="field"><span>그 조상까지 몇 세대인지</span><input type="number" name="generations" min="1" value="1" required></label>
-        <label class="field"><span>부계/모계 (아는 경우만)</span><select name="side"><option value="">모름</option><option value="sire">부계 라인 (아빠 쪽 집안)</option><option value="dam">모계 라인 (엄마 쪽 집안)</option></select></label>
+        <label class="field"><span>부계/모계 (아는 경우만)</span><select name="side"><option value="">모름</option><option value="sire">부계 라인</option><option value="dam">모계 라인</option></select></label>
       </div>
       <div class="readonly-note" style="margin-top:-8px;">부계/모계는 "직접 부모가 누구냐"가 아니라, 그 조상까지 이어지는 계보가 대상의 아빠 쪽 집안을 거치는지 엄마 쪽 집안을 거치는지를 말해요. 몇 대를 거슬러 올라가든 상관없이 둘 중 하나예요(할아버지든 할머니든 아빠 쪽에서 왔으면 부계).</div>
       <div class="readonly-note" style="margin-top:-8px;">예) "제트는 짐과 3세대 차이, 아빠 쪽 집안" → 대상: 제트 / 조상: 짐 / 세대: 3 / 부계<br>예) "크리스마스의 부가 짐" → 대상: 크리스마스 / 조상: 짐 / 세대: 1 / 부계</div>
@@ -3439,9 +3456,15 @@ function renderPedigreeTab(){
   페어링을 고려 중인 두 개체를 선택하면, 등록된 부모 정보를 거슬러 올라가 공통 조상이 있는지 확인해드려요.
   </p>
   <div class="pc-select-row">
-    <button type="button" class="pc-select-btn" onclick="openEntityPicker('a')">${esc(pedigreeSel.a?pedigreeEntityLabel(pedigreeSel.a):'개체 선택하기')}</button>
+    <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+      <button type="button" class="pc-select-btn" style="flex:1;" onclick="openEntityPicker('a')">${renderPedigreeSelectBtnContent('a')}</button>
+      ${pedigreeSel.a?`<button type="button" onclick="clearPedigreeSel('a')" aria-label="선택 해제" style="flex:0 0 auto;width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface-2);color:var(--ink-faint);font-size:13px;cursor:pointer;">×</button>`:''}
+    </div>
     <div class="vs">×</div>
-    <button type="button" class="pc-select-btn" onclick="openEntityPicker('b')">${esc(pedigreeSel.b?pedigreeEntityLabel(pedigreeSel.b):'개체 선택하기')}</button>
+    <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+      <button type="button" class="pc-select-btn" style="flex:1;" onclick="openEntityPicker('b')">${renderPedigreeSelectBtnContent('b')}</button>
+      ${pedigreeSel.b?`<button type="button" onclick="clearPedigreeSel('b')" aria-label="선택 해제" style="flex:0 0 auto;width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface-2);color:var(--ink-faint);font-size:13px;cursor:pointer;">×</button>`:''}
+    </div>
   </div>`;
 
   if(pedigreeSel.a && pedigreeSel.b){
@@ -4447,7 +4470,7 @@ function renderSoldTab(){
    초기화
 ===================================================================== */
 /* ---------------- 새 버전 확인(캐시 우회) ---------------- */
-const APP_BUILD_VERSION = '2026-08-29 09:12 KST';
+const APP_BUILD_VERSION = '2026-08-29 09:27 KST';
 async function checkForNewVersion(){
   try{
     const res = await fetch(location.href, { cache: 'no-store' });
