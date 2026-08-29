@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<!-- BUILD_VERSION: 2026-08-29 08:56 KST -->
+<!-- BUILD_VERSION: 2026-08-29 09:12 KST -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>HotChocoCre</title>
@@ -1181,14 +1181,14 @@ function buildAncestryMap(startEntity, maxGen){
   return visited;
 }
 
-/* 세대수 + 부/모 쪽을 한국어 호칭으로: 1대=부/모, 2대=조부모/외조부모, 3대=증조부모/외증조부모,
-   4대 이상이거나 어느 쪽인지 모르면 "N대 위 조상" */
+/* 세대수 + 부계/모계를 한국어 호칭으로: 1대=부/모, 2대=조부모/외조부모, 3대=증조부모/외증조부모,
+   4대 이상은 별도 호칭은 없지만 부계/모계 구분은 계속 붙여준다("N대 위 조상(부계)"처럼) */
 function kinshipLabel(gen, branch){
+  if(gen===1) return branch==='sire' ? '부' : (branch==='dam' ? '모' : '부모 중 한쪽(미상)');
+  if(gen===2) return branch==='sire' ? '조부모(부계)' : (branch==='dam' ? '외조부모(모계)' : '조부모');
+  if(gen===3) return branch==='sire' ? '증조부모(부계)' : (branch==='dam' ? '외증조부모(모계)' : '증조부모');
   if(!branch) return `${gen}대 위 조상`;
-  if(gen===1) return branch==='sire' ? '부' : '모';
-  if(gen===2) return branch==='sire' ? '조부모' : '외조부모';
-  if(gen===3) return branch==='sire' ? '증조부모' : '외증조부모';
-  return `${gen}대 위 조상`;
+  return `${gen}대 위 조상(${branch==='sire'?'부계':'모계'})`;
 }
 
 function entityKeyOf(ent){
@@ -3383,9 +3383,9 @@ function renderExternalLineageRefList(){
   const refs = state.externalLineageRefs||[];
   if(refs.length===0) return `<div class="readonly-note">아직 등록된 외부 혈통 참조가 없어요.</div>`;
   return refs.map(r=>{
-    const sideLabel = r.side==='sire' ? '부 쪽' : (r.side==='dam' ? '모 쪽' : '어느 쪽인지 모름');
+    const sideLabel = r.side==='sire' ? '부계 라인' : (r.side==='dam' ? '모계 라인' : '부계/모계 모름');
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-top:1px dashed var(--border);">
-      <div style="font-size:12.5px;color:var(--ink);"><b>${esc(r.subjectLabel)}</b> = <b>${esc(r.ancestorName)}</b>의 ${esc(r.generations)}세손 (${esc(sideLabel)})</div>
+      <div style="font-size:12.5px;color:var(--ink);"><b>${esc(r.subjectLabel)}</b> = <b>${esc(r.ancestorName)}</b>와 ${esc(r.generations)}세대 차이 (${esc(sideLabel)})</div>
       <button type="button" onclick="deleteExternalLineageRef('${r.id}')" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;padding:4px 8px;">삭제</button>
     </div>`;
   }).join('');
@@ -3397,10 +3397,11 @@ function openAddExternalLineageRefForm(){
       <div class="readonly-note" style="margin-top:-8px;">등록된 개체 이름과 정확히 같으면 그 개체에 연결되고, 아니면 '이름만 아는 조상'으로 저장돼서 나중에 그 이름이 부모로 등장하는 곳마다 자동으로 이어져요.</div>
       <div class="form-grid">
         <label class="field full"><span>알려진 조상 이름</span><input name="ancestorName" required placeholder="예: 짐"></label>
-        <label class="field"><span>그 조상의 몇 세손인지</span><input type="number" name="generations" min="1" value="1" required></label>
-        <label class="field"><span>어느 쪽인지(아는 경우만)</span><select name="side"><option value="">모름</option><option value="sire">부(수컷) 쪽</option><option value="dam">모(암컷) 쪽</option></select></label>
+        <label class="field"><span>그 조상까지 몇 세대인지</span><input type="number" name="generations" min="1" value="1" required></label>
+        <label class="field"><span>부계/모계 (아는 경우만)</span><select name="side"><option value="">모름</option><option value="sire">부계 라인 (아빠 쪽 집안)</option><option value="dam">모계 라인 (엄마 쪽 집안)</option></select></label>
       </div>
-      <div class="readonly-note" style="margin-top:-8px;">예) "제트는 짐의 3세손" → 대상: 제트 / 조상: 짐 / 세대: 3 / 어느쪽: 모름<br>예) "크리스마스의 부가 짐" → 대상: 크리스마스 / 조상: 짐 / 세대: 1 / 어느쪽: 부</div>
+      <div class="readonly-note" style="margin-top:-8px;">부계/모계는 "직접 부모가 누구냐"가 아니라, 그 조상까지 이어지는 계보가 대상의 아빠 쪽 집안을 거치는지 엄마 쪽 집안을 거치는지를 말해요. 몇 대를 거슬러 올라가든 상관없이 둘 중 하나예요(할아버지든 할머니든 아빠 쪽에서 왔으면 부계).</div>
+      <div class="readonly-note" style="margin-top:-8px;">예) "제트는 짐과 3세대 차이, 아빠 쪽 집안" → 대상: 제트 / 조상: 짐 / 세대: 3 / 부계<br>예) "크리스마스의 부가 짐" → 대상: 크리스마스 / 조상: 짐 / 세대: 1 / 부계</div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal()">취소</button>
         <button type="submit" class="btn btn-primary">추가</button>
@@ -4446,7 +4447,7 @@ function renderSoldTab(){
    초기화
 ===================================================================== */
 /* ---------------- 새 버전 확인(캐시 우회) ---------------- */
-const APP_BUILD_VERSION = '2026-08-29 08:56 KST';
+const APP_BUILD_VERSION = '2026-08-29 09:12 KST';
 async function checkForNewVersion(){
   try{
     const res = await fetch(location.href, { cache: 'no-store' });
